@@ -74,6 +74,36 @@ export const useThread = (id: number | null) =>
 export const useIdentities = () =>
   useQuery({ queryKey: ["identities"], queryFn: () => api<Identity[]>("/identities") });
 
+export type SendMessageRequest = {
+  from: string;
+  to: string[];
+  cc?: string[];
+  subject: string;
+  text: string;
+  html?: string;
+  inReplyTo?: string;
+  attachments?: { filename: string; mimeType: string; contentBase64: string }[];
+};
+
+export type SendMessageResult = {
+  id: number;
+  delivered: string[];
+  queued: string[];
+  permanentBounces: string[];
+};
+
+export const useSendMessage = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: SendMessageRequest) =>
+      api<SendMessageResult>("/messages", { method: "POST", body: JSON.stringify(vars) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["threads"] });
+      qc.invalidateQueries({ queryKey: ["thread"] });
+    },
+  });
+};
+
 export const useUpdateMessage = () => {
   const qc = useQueryClient();
   return useMutation({

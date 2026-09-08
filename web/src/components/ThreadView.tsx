@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useThread, useUpdateMessage, type MessageDetail } from "../api/client";
+import { Composer } from "./Composer";
 import { MessageBody } from "./MessageBody";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 const formatDate = (epoch: number) =>
   new Date(epoch * 1000).toLocaleString("fr-FR", {
@@ -32,10 +34,12 @@ function MessageItem({
   message,
   open,
   onToggle,
+  onReply,
 }: {
   message: MessageDetail;
   open: boolean;
   onToggle: () => void;
+  onReply: () => void;
 }) {
   const updateMessage = useUpdateMessage();
 
@@ -80,7 +84,11 @@ function MessageItem({
           )}
 
           <div className="flex gap-2 border-t border-border px-4 py-2">
-            <button type="button" className="rounded border border-border px-2 py-1 text-xs hover:bg-accent">
+            <button
+              type="button"
+              className="rounded border border-border px-2 py-1 text-xs hover:bg-accent"
+              onClick={onReply}
+            >
               Répondre
             </button>
             <button
@@ -107,6 +115,7 @@ function MessageItem({
 export function ThreadView({ threadId }: { threadId: number }) {
   const { data: thread } = useThread(threadId);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [replyingTo, setReplyingTo] = useState<MessageDetail | null>(null);
   const updateMessage = useUpdateMessage();
   const markedThreadId = useRef<number | null>(null);
 
@@ -147,9 +156,26 @@ export function ThreadView({ threadId }: { threadId: number }) {
       </div>
       <ul>
         {thread.messages.map((m) => (
-          <MessageItem key={m.id} message={m} open={openId === m.id} onToggle={() => setOpenId(openId === m.id ? null : m.id)} />
+          <MessageItem
+            key={m.id}
+            message={m}
+            open={openId === m.id}
+            onToggle={() => setOpenId(openId === m.id ? null : m.id)}
+            onReply={() => setReplyingTo(m)}
+          />
         ))}
       </ul>
+
+      <Dialog open={replyingTo !== null} onOpenChange={(open) => !open && setReplyingTo(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Répondre</DialogTitle>
+          </DialogHeader>
+          {replyingTo && (
+            <Composer mode="reply" replyTo={replyingTo} onClose={() => setReplyingTo(null)} />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
