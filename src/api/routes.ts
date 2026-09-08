@@ -4,6 +4,7 @@ import type { Env } from "../env";
 import type { AccessIdentity } from "../auth/access";
 import { getThread, listIdentities, listThreads } from "../db/queries";
 import { moveToFolder, purgeMessage, setRead } from "../db/mutations";
+import { sanitizeHtml } from "../html/sanitize";
 
 export type ApiEnv = { Bindings: Env; Variables: { identity: AccessIdentity } };
 
@@ -63,6 +64,33 @@ api.patch("/messages/:id", async (c) => {
   if (ok && parsed.data.folder !== undefined) ok = await moveToFolder(c.env.DB, id, parsed.data.folder);
   if (!ok) return c.json({ error: { code: "not_found", message: "Message introuvable" } }, 404);
   return c.json({ ok: true });
+});
+
+api.get("/messages/:id/body", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) {
+    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+  }
+
+  const msg = await c.env.DB.prepare("SELECT html_body, text_body FROM messages WHERE id = ?")
+    .bind(id)
+    .first<{ html_body: string | null; text_body: string | null }>();
+  if (!msg) return c.json({ error: { code: "not_found", message: "Message introuvable" } }, 404);
+  if (!msg.html_body) {
+    return c.json({ html: null, text: msg.text_body ?? "", hasRemoteImages: false });
+  }
+
+  const atts = await c.env.DB.prepare(
+    "SELECT id, content_id FROM attachments WHERE message_id = ? AND content_id IS NOT NULL"
+  ).bind(id).all<{ id: number; content_id: string }>();
+  const cidMap = Object.fromEntries(atts.results.map((a) => [a.content_id, a.id]));
+
+  // Tout sauf "allowed" bloque les images distantes — absence du paramètre comprise.
+  const result = await sanitizeHtml(msg.html_body, {
+    cidMap,
+    blockRemoteImages: c.req.query("images") !== "allowed",
+  });
+  return c.json({ html: result.html, text: msg.text_body ?? "", hasRemoteImages: result.hasRemoteImages });
 });
 
 api.delete("/messages/:id", async (c) => {

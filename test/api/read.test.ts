@@ -188,3 +188,87 @@ describe("routes /api", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("GET /api/messages/:id/body", () => {
+  it("assainit le HTML et bloque les images distantes par défaut", async () => {
+    await insertThread(1, "a", 100);
+    await insertMessage(1, 1);
+    await env.DB.prepare(
+      "UPDATE messages SET html_body = ? WHERE id = 1"
+    ).bind(`<p>ok</p><script>alert(1)</script><img src="https://tracker/pixel.gif">`).run();
+
+    const res = await app.request("https://example.com/api/messages/1/body", {}, { ...env, DEV_BYPASS_AUTH: "1" });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ html: string; hasRemoteImages: boolean }>();
+    expect(body.html).not.toContain("<script");
+    expect(body.html).toContain('data-blocked-src="https://tracker/pixel.gif"');
+    expect(body.hasRemoteImages).toBe(true);
+  });
+
+  it("lève le blocage des images distantes avec ?images=allowed", async () => {
+    await insertThread(1, "a", 100);
+    await insertMessage(1, 1);
+    await env.DB.prepare(
+      "UPDATE messages SET html_body = ? WHERE id = 1"
+    ).bind(`<img src="https://ok/a.png">`).run();
+
+    const res = await app.request("https://example.com/api/messages/1/body?images=allowed", {}, { ...env, DEV_BYPASS_AUTH: "1" });
+    const body = await res.json<{ html: string }>();
+    expect(body.html).toContain('src="https://ok/a.png"');
+  });
+
+  it("bloque pour toute autre valeur de ?images= que 'allowed'", async () => {
+    await insertThread(1, "a", 100);
+    await insertMessage(1, 1);
+    await env.DB.prepare(
+      "UPDATE messages SET html_body = ? WHERE id = 1"
+    ).bind(`<img src="https://ok/a.png">`).run();
+
+    const res = await app.request("https://example.com/api/messages/1/body?images=blocked", {}, { ...env, DEV_BYPASS_AUTH: "1" });
+    const body = await res.json<{ html: string }>();
+    expect(body.html.replace(/data-blocked-src="[^"]*"/g, "")).not.toContain("https://ok/a.png");
+    expect(body.html).toContain('data-blocked-src="https://ok/a.png"');
+  });
+
+  it("réécrit les cid: vers /api/attachments/<id>", async () => {
+    await insertThread(1, "a", 100);
+    await insertMessage(1, 1);
+    await env.DB.prepare(
+      "UPDATE messages SET html_body = ? WHERE id = 1"
+    ).bind(`<img src="cid:logo123">`).run();
+    await env.DB.prepare(
+      "INSERT INTO attachments (message_id, filename, content_id, r2_key) VALUES (1, 'logo.png', 'logo123', 'att/1/0-logo.png')"
+    ).run();
+
+    const res = await app.request("https://example.com/api/messages/1/body", {}, { ...env, DEV_BYPASS_AUTH: "1" });
+    const body = await res.json<{ html: string }>();
+    expect(body.html).toContain('src="/api/attachments/');
+  });
+
+  it("répond avec html null quand le message n'a pas de corps HTML", async () => {
+    await insertThread(1, "a", 100);
+    await insertMessage(1, 1, { text: "texte brut" });
+
+    const res = await app.request("https://example.com/api/messages/1/body", {}, { ...env, DEV_BYPASS_AUTH: "1" });
+    const body = await res.json<{ html: string | null; text: string }>();
+    expect(body.html).toBeNull();
+    expect(body.text).toBe("texte brut");
+  });
+
+  it("répond 404 pour un message inexistant", async () => {
+    const res = await app.request("https://example.com/api/messages/999/body", {}, { ...env, DEV_BYPASS_AUTH: "1" });
+    expect(res.status).toBe(404);
+  });
+
+  it("répond 400 pour un id non numérique", async () => {
+    const res = await app.request("https://example.com/api/messages/abc/body", {}, { ...env, DEV_BYPASS_AUTH: "1" });
+    expect(res.status).toBe(400);
+  });
+
+  it("répond 401 sans jeton", async () => {
+    await insertThread(1, "a", 100);
+    await insertMessage(1, 1);
+    const res = await app.request("https://example.com/api/messages/1/body", {}, { ...env, DEV_BYPASS_AUTH: undefined });
+    expect(res.status).toBe(401);
+  });
+});
