@@ -1,0 +1,17 @@
+From: bot@example.com
+To: thomas@planigramme.fr, autre@planigramme.fr
+Cc: chef@example.com
+Subject: Rapport
+Message-ID: <multi-1@example.com>
+Date: Mon, 08 Sep 2026 11:00:00 +0200
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+
+Version texte
+--b1
+Content-Type: text/html; charset=utf-8
+
+<p>Version <b>HTML</b></p>
+--b1--
