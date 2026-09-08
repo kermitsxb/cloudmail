@@ -53,6 +53,11 @@ api.patch("/messages/:id", async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: "invalid_body", message: parsed.error.message } }, 400);
   }
+  // Non atomique entre les deux appels : quand isRead et folder sont fournis ensemble,
+  // setRead et moveToFolder s'exécutent dans deux `batch` D1 indépendants. Un échec entre les
+  // deux laisserait is_read appliqué sans le changement de dossier (ou l'inverse). Accepté pour
+  // cette tâche (probabilité faible, effet borné à l'incohérence d'un seul message) ; à
+  // regrouper dans une transaction unique si ça devient sensible.
   let ok = true;
   if (parsed.data.isRead !== undefined) ok = await setRead(c.env.DB, id, parsed.data.isRead);
   if (ok && parsed.data.folder !== undefined) ok = await moveToFolder(c.env.DB, id, parsed.data.folder);
