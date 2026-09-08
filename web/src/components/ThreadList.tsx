@@ -13,16 +13,23 @@ export function ThreadList({
   threads,
   selectedId,
   onSelect,
+  hasMore = false,
+  isLoadingMore = false,
+  onLoadMore,
 }: {
   threads: ThreadSummary[];
   selectedId: number | null;
   onSelect: (id: number) => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   if (threads.length === 0) {
     return <p className="p-8 text-center text-sm text-muted-foreground">Aucun message ici.</p>;
   }
 
   return (
+    <>
     <ul role="listbox" aria-label="Conversations" className="divide-y">
       {threads.map((t) => (
         <li
@@ -53,5 +60,18 @@ export function ThreadList({
         </li>
       ))}
     </ul>
+    {hasMore && (
+      <div className="p-3 text-center">
+        <button
+          type="button"
+          disabled={isLoadingMore}
+          onClick={() => onLoadMore?.()}
+          className="rounded border border-border px-3 py-1 text-xs hover:bg-accent disabled:opacity-50"
+        >
+          {isLoadingMore ? "Chargement…" : "Charger plus"}
+        </button>
+      </div>
+    )}
+    </>
   );
 }

@@ -49,7 +49,8 @@ describe("Composer", () => {
           id: 1, messageId: "<p@x>", direction: "in", folder: "inbox",
           from: { address: "zoe@example.com", name: "Zoé" }, to: [], cc: [],
           subject: "Facture", text: "", html: null, receivedAt: 1, isRead: true,
-          parseError: false, attachments: [],
+          parseError: false,
+    bodyTruncated: false, attachments: [],
         }}
         onClose={() => {}}
       />

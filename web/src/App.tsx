@@ -12,7 +12,8 @@ function Mailbox() {
   const [query, setQuery] = useState("");
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
 
-  const { data } = useThreads(folder, query);
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useThreads(folder, query);
+  const threads = data?.pages.flatMap((p) => p.threads) ?? [];
 
   const handleSelectFolder = (next: string) => {
     setFolder(next);
@@ -36,7 +37,14 @@ function Mailbox() {
           />
         </div>
         <div className="flex-1 overflow-y-auto">
-          <ThreadList threads={data?.threads ?? []} selectedId={selectedThreadId} onSelect={setSelectedThreadId} />
+          <ThreadList
+            threads={threads}
+            selectedId={selectedThreadId}
+            onSelect={setSelectedThreadId}
+            hasMore={hasNextPage}
+            isLoadingMore={isFetchingNextPage}
+            onLoadMore={() => fetchNextPage()}
+          />
         </div>
       </div>
       <div className={selectedThreadId === null ? "hidden lg:flex" : "flex"}>

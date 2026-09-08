@@ -22,6 +22,7 @@ const thread: ThreadDetail = {
       receivedAt: 1757318400,
       isRead: false,
       parseError: false,
+      bodyTruncated: false,
       attachments: [],
     },
     {
@@ -38,6 +39,7 @@ const thread: ThreadDetail = {
       receivedAt: 1757404800,
       isRead: false,
       parseError: false,
+      bodyTruncated: false,
       attachments: [{ id: 99, filename: "facture.pdf", mimeType: "application/pdf", size: 1234 }],
     },
   ],
