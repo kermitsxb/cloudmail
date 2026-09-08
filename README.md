@@ -34,8 +34,8 @@ Telles que définies dans `package.json` :
 - `pnpm dev` — lance en parallèle `pnpm wrangler dev` (le Worker, avec D1 et R2
   simulés localement par Miniflare) et `pnpm --filter web dev` (le serveur de dev
   Vite du SPA).
-- `pnpm test` — exécute `vitest run` (176 tests côté Worker : ingestion, API,
-  auth, envoi) puis `pnpm --filter web test` (18 tests côté SPA).
+- `pnpm test` — exécute `vitest run` (189 tests côté Worker : ingestion, API,
+  auth, envoi) puis `pnpm --filter web test` (24 tests côté SPA).
 - `pnpm build` — construit uniquement le SPA (`pnpm --filter web build`), dont la
   sortie (`web/dist`) est servie par le Worker via le binding `ASSETS`.
 - `pnpm deploy` — enchaîne `pnpm build` puis `pnpm wrangler deploy` : reconstruit
@@ -48,6 +48,14 @@ Telles que définies dans `package.json` :
 Ces étapes touchent le compte Cloudflare payant de l'utilisateur et rendent le
 service public : elles ne sont **pas** automatisées et doivent être exécutées à
 la main, dans l'ordre, par la personne qui opère le compte.
+
+L'ordre compte, et pas seulement pour des raisons de commodité : la base D1 est
+migrée et peuplée (étapes 2 et 3) **avant** tout branchement d'Email Routing
+(étape 6). L'ordre inverse perd du courrier — un message arrivé entre
+l'activation de la règle catch-all et l'application des migrations rencontre
+`no such table: messages`, l'erreur est avalée par `handleEmail` (qui n'appelle
+jamais `setReject`, pour ne pas renvoyer de bounce à l'expéditeur), et le message
+ne survit que comme objet R2 sans ligne D1 ni index inverse.
 
 ### 1. Créer la base D1 et le bucket R2
 
@@ -77,7 +85,31 @@ données fonctionnelle. Le placeholder `"local"` ne fonctionne qu'en local, où
 Miniflare simule D1 sans authentification Cloudflare — voir le commentaire dans
 `wrangler.jsonc`.
 
-### 2. Premier déploiement (fait exister le Worker)
+### 2. Appliquer les migrations en distant
+
+```bash
+pnpm wrangler d1 migrations apply cloudmail --remote
+```
+
+Cette étape crée les tables (`identities`, `threads`, `messages`, ...) définies
+dans `migrations/0001_initial.sql` sur la base D1 distante. Elle ne dépend que de
+l'étape 1 (base créée, `database_id` renseigné) : ni du Worker, ni d'Access, ni
+d'Email Routing. Si elle est oubliée, toute requête D1 échoue avec « no such
+table » — y compris celles du handler `email()`, dont l'échec est silencieux.
+
+### 3. Peupler la table `identities`
+
+```bash
+pnpm wrangler d1 execute cloudmail --remote --command \
+  "INSERT INTO identities (address, display_name, is_default) VALUES ('thomas@planigramme.fr', 'Thomas Stocker', 1)"
+```
+
+Cette étape crée l'identité d'envoi par défaut ; elle a besoin des tables de
+l'étape 2. Sans ligne dans `identities`, l'API n'a aucune adresse `From` à
+proposer pour composer ou répondre à un message, et `POST /api/messages` refuse
+tout envoi avec `unknown_sender`.
+
+### 4. Premier déploiement (fait exister le Worker)
 
 ```bash
 pnpm deploy
@@ -85,17 +117,20 @@ pnpm deploy
 
 Ce premier déploiement n'a qu'un but : faire exister le Worker `cloudmail` sur
 le compte Cloudflare. Il est nécessaire ici, avant même la configuration
-d'Access et des secrets d'envoi, parce que l'étape 4 (Email Routing) doit
+d'Access et des secrets d'envoi, parce que l'étape 6 (Email Routing) doit
 choisir ce Worker dans une liste déroulante du tableau de bord — et cette
 liste ne propose que des Workers déjà déployés. Sans ce premier déploiement,
-l'étape 4 est une impasse : la liste est vide et il n'y a rien à sélectionner.
+l'étape 6 est une impasse : la liste est vide et il n'y a rien à sélectionner.
 
-À ce stade, le Worker déployé est incomplet (secrets d'envoi absents,
-`ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` encore vides) : c'est normal, aucun trafic
-réel n'est encore attendu. Un second déploiement, final, aura lieu à l'étape 10
-une fois toute la configuration en place.
+Ce déploiement n'a besoin que des bindings de l'étape 1 (base D1 et bucket R2
+existants). À ce stade, le Worker déployé est incomplet (secrets d'envoi
+absents, `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` encore vides) : c'est normal, et sans
+danger — avec ces variables vides, `requireAccess()` rejette **toute** requête
+API en `401`, donc rien n'est exposé publiquement entre ce déploiement et le
+déploiement final de l'étape 10. Sa base, elle, est déjà migrée et peuplée
+(étapes 2-3) : le Worker est d'emblée capable d'ingérer du courrier.
 
-### 3. Vérifier le domaine dans Email Service
+### 5. Vérifier le domaine dans Email Service
 
 Tableau de bord Cloudflare → Email → Email Service → Sending → ajouter
 `planigramme.fr` et publier les enregistrements DNS demandés (SPF/DKIM). Attendre
@@ -106,18 +141,23 @@ via l'API Cloudflare Email Sending. Si elle est oubliée ou incomplète, tout
 envoi via `src/send/client.ts` échoue (l'API Cloudflare rejette les messages
 provenant d'un domaine non vérifié).
 
-### 4. Activer Email Routing avec une règle catch-all
+### 6. Activer Email Routing avec une règle catch-all
 
 Tableau de bord Cloudflare → Email → Email Routing → activer, puis créer une
 règle catch-all « Send to a Worker » pointant sur le Worker `cloudmail` (visible
-dans la liste grâce au déploiement de l'étape 2).
+dans la liste grâce au déploiement de l'étape 4).
 
 Cette étape produit le déclenchement du handler `email()` (`src/email.ts`) pour
 tout message reçu sur `*@planigramme.fr`. Si elle est oubliée, aucun message
 entrant n'atteint jamais Cloudmail : Cloudflare les rejette ou les jette selon
 la configuration DNS MX en place.
 
-### 5. Créer l'application Cloudflare Access
+C'est la première étape à partir de laquelle du courrier réel peut arriver :
+elle exige donc que tout ce dont l'ingestion a besoin existe déjà — le Worker
+déployé (étape 4), le bucket R2 (étape 1) et surtout les tables D1 (étape 2).
+C'est la raison de la position de cette étape dans la séquence.
+
+### 7. Créer l'application Cloudflare Access
 
 Zero Trust → Access → Applications → Self-hosted, domaine `mail.planigramme.fr`,
 politique « Emails » limitée à `thomas.stocker.pro@gmail.com`. Copier ensuite
@@ -138,9 +178,9 @@ API avec `401 unauthenticated`. Si `ACCESS_TEAM_DOMAIN` ou `ACCESS_AUD` sont
 laissés vides (leur valeur par défaut dans `wrangler.jsonc`), la vérification
 JWT échoue systématiquement et personne — pas même l'utilisateur légitime — ne
 peut se connecter. (Ces valeurs ne seront effectivement appliquées qu'au
-second déploiement, étape 10.)
+déploiement final, étape 10.)
 
-### 6. Créer un token API restreint à l'envoi d'emails
+### 8. Créer un token API restreint à l'envoi d'emails
 
 Tableau de bord Cloudflare → créer un token API avec la seule permission
 « Email Sending: Send » (aucune autre permission — ce token ne doit pas pouvoir
@@ -151,7 +191,7 @@ Cette étape produit le jeton utilisé par `src/send/client.ts` pour appeler
 un risque inutile en cas de fuite ; un token absent ou mal scopé fait échouer
 tout envoi avec une erreur d'autorisation Cloudflare.
 
-### 7. Poser les secrets
+### 9. Poser les secrets
 
 ```bash
 pnpm wrangler secret put CF_ACCOUNT_ID
@@ -159,30 +199,10 @@ pnpm wrangler secret put CF_API_TOKEN
 ```
 
 Ces deux commandes produisent les secrets chiffrés lus par `src/send/client.ts`
-via `env.CF_ACCOUNT_ID` et `env.CF_API_TOKEN`. Sans eux, toute tentative de
-réponse ou d'envoi échoue immédiatement au moment de l'appel à l'API Cloudflare.
-
-### 8. Appliquer les migrations en distant
-
-```bash
-pnpm wrangler d1 migrations apply cloudmail --remote
-```
-
-Cette étape crée les tables (`identities`, `threads`, `messages`, ...) définies
-dans `migrations/0001_initial.sql` sur la base D1 distante. Si elle est
-oubliée, la première requête du Worker déployé contre D1 échoue avec une erreur
-« no such table ».
-
-### 9. Peupler la table `identities`
-
-```bash
-pnpm wrangler d1 execute cloudmail --remote --command \
-  "INSERT INTO identities (address, display_name, is_default) VALUES ('thomas@planigramme.fr', 'Thomas Stocker', 1)"
-```
-
-Cette étape crée l'identité d'envoi par défaut. Sans ligne dans `identities`,
-l'API n'a aucune adresse `From` à proposer pour composer ou répondre à un
-message.
+via `env.CF_ACCOUNT_ID` et `env.CF_API_TOKEN` — dont le jeton créé à l'étape 8.
+Sans eux, toute tentative de réponse ou d'envoi échoue immédiatement au moment
+de l'appel à l'API Cloudflare. Elles s'appliquent au Worker, qui doit donc déjà
+exister (étape 4).
 
 ### 10. Déploiement final
 
@@ -191,12 +211,12 @@ pnpm deploy
 ```
 
 Second et dernier déploiement : cette fois le Worker part avec les secrets
-d'envoi posés (étape 7), les variables `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD`
-renseignées (étape 5) et une base D1 migrée et peuplée (étapes 8-9). C'est
+d'envoi posés (étape 9), les variables `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD`
+renseignées (étape 7) et une base D1 migrée et peuplée (étapes 2-3). C'est
 cette exécution qui rend le service effectivement utilisable en production ;
 tant qu'elle n'a pas eu lieu après les étapes précédentes, l'authentification
 Access et l'envoi d'email restent non fonctionnels malgré un Worker déjà en
-ligne depuis l'étape 2.
+ligne depuis l'étape 4.
 
 ## Rejeu d'un message (`reparse`)
 
@@ -246,6 +266,72 @@ identiques partagent la même clé. La ligne D1 correspondante (table
 `messages`) est la seule adresse connue de cet objet R2 — il n'existe pas
 d'index inverse ni de listing qui permette de retrouver un message à partir de
 sa clé R2 sans passer par D1.
+
+## Réconciliation R2 ↔ D1 (recherche d'orphelins)
+
+L'invariant le plus fort du projet est « aucun message reçu n'est perdu » : le
+MIME brut est écrit dans R2 **avant** tout parsing et toute écriture D1. Le
+corollaire est qu'un échec ultérieur (insertion D1 refusée, base pas encore
+migrée, bug d'ingestion) laisse un objet R2 sans ligne `messages` — et comme il
+n'existe aucun index inverse (voir la section précédente), rien ne le signale.
+Cette procédure est la seule façon de vérifier l'invariant en production. Elle
+est manuelle et hors application : **aucune route d'administration n'est livrée,
+et c'est délibéré** (une route qui liste ou rejoue du contenu de message mérite
+son propre cycle de conception, pas un ajout de dernière minute).
+
+**1. Extraire les clés connues de D1.**
+
+```bash
+pnpm wrangler d1 execute cloudmail --remote --json \
+  --command "SELECT raw_key FROM messages ORDER BY raw_key" \
+  | jq -r '.[0].results[].raw_key' | sort > d1-raw-keys.txt
+```
+
+**2. Lister le préfixe `raw/` dans R2.** Attention : `wrangler r2 object` ne sait
+que `get`, `put` et `delete` — **il n'existe pas de sous-commande de listing**
+(vérifié sur wrangler 4.x). Le listing passe donc par l'API S3-compatible de R2,
+avec un jeton R2 « Object Read » (Access Key ID / Secret Access Key créés depuis
+R2 → Manage API tokens) :
+
+```bash
+export AWS_ACCESS_KEY_ID=<access key id R2>
+export AWS_SECRET_ACCESS_KEY=<secret access key R2>
+export AWS_DEFAULT_REGION=auto
+
+aws s3api list-objects-v2 \
+  --endpoint-url "https://<CF_ACCOUNT_ID>.r2.cloudflarestorage.com" \
+  --bucket cloudmail --prefix "raw/" \
+  --query 'Contents[].Key' --output text \
+  | tr '\t' '\n' | sort > r2-raw-keys.txt
+```
+
+(À défaut d'`aws`, `rclone lsf` sur un remote S3 pointant le même endpoint
+produit la même liste ; l'explorateur d'objets du tableau de bord R2 permet de
+parcourir le préfixe à l'œil, ce qui suffit sur un petit volume.)
+
+**3. Comparer les deux listes.**
+
+```bash
+# Orphelins : objet R2 présent, aucune ligne D1 — le cas à traiter.
+comm -23 r2-raw-keys.txt d1-raw-keys.txt
+
+# Cas inverse : ligne D1 dont l'objet R2 a disparu (purge interrompue, cf.
+# purgeMessage) — GET /api/messages/:id/raw répond 404 pour ces messages.
+comm -13 r2-raw-keys.txt d1-raw-keys.txt
+```
+
+**4. Inspecter un orphelin**, pour décider s'il vaut la peine d'être réingéré :
+
+```bash
+pnpm wrangler r2 object get cloudmail/raw/<sha256>.eml --remote --file orphelin.eml
+head -40 orphelin.eml   # From, To, Subject, Message-ID
+```
+
+**5. Réingérer.** `reparse(env, rawKey, envelopeFrom)` (section « Rejeu d'un
+message » ci-dessus) relit exactement cet objet et rejoue l'ingestion complète ;
+elle fonctionne aussi bien sur un orphelin — il n'y a alors simplement aucune
+ligne D1 existante à supprimer au préalable. Le déclenchement se fait par la
+route temporaire décrite dans cette même section, à retirer ensuite.
 
 ## Développement local
 
