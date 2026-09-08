@@ -8,7 +8,7 @@ export type MessageDetail = {
   to: { address: string; name: string | null }[];
   cc: { address: string; name: string | null }[];
   subject: string; text: string; html: string | null;
-  receivedAt: number; isRead: boolean; parseError: boolean;
+  receivedAt: number; isRead: boolean; parseError: boolean; bodyTruncated: boolean;
   attachments: { id: number; filename: string; mimeType: string; size: number }[];
 };
 export type ThreadDetail = { id: number; subject: string; messages: MessageDetail[] };
@@ -99,24 +99,31 @@ export async function listThreads(
 export async function getThread(db: D1Database, id: number): Promise<ThreadDetail | null> {
   const messages = await db.prepare(
     `SELECT id, message_id, direction, folder, from_addr, from_name, subject, text_body, html_body,
-            received_at, is_read, parse_error
+            received_at, is_read, parse_error, body_truncated
      FROM messages WHERE thread_id = ? ORDER BY received_at ASC`
   ).bind(id).all<{
     id: number; message_id: string; direction: "in" | "out"; folder: string;
     from_addr: string; from_name: string | null; subject: string | null;
     text_body: string | null; html_body: string | null;
-    received_at: number; is_read: number; parse_error: number;
+    received_at: number; is_read: number; parse_error: number; body_truncated: number;
   }>();
   if (messages.results.length === 0) return null;
 
-  const ids = messages.results.map((m) => m.id);
-  const placeholders = ids.map(() => "?").join(",");
+  // Jointure sur thread_id plutôt qu'un IN (?, ?, ...) énumérant chaque message : D1
+  // plafonne à 100 les paramètres liés par requête, donc l'ancienne forme rendait tout fil
+  // de plus de 100 messages définitivement inouvrable (erreur systématique sur
+  // GET /api/threads/:id). Ici la requête lie un seul paramètre, quelle que soit la taille
+  // du fil.
   const recipients = await db.prepare(
-    `SELECT message_id, kind, address, name FROM recipients WHERE message_id IN (${placeholders})`
-  ).bind(...ids).all<{ message_id: number; kind: string; address: string; name: string | null }>();
+    `SELECT r.message_id, r.kind, r.address, r.name
+       FROM recipients r JOIN messages m ON m.id = r.message_id
+      WHERE m.thread_id = ?`
+  ).bind(id).all<{ message_id: number; kind: string; address: string; name: string | null }>();
   const attachments = await db.prepare(
-    `SELECT id, message_id, filename, mime_type, size FROM attachments WHERE message_id IN (${placeholders})`
-  ).bind(...ids).all<{ id: number; message_id: number; filename: string; mime_type: string; size: number }>();
+    `SELECT a.id, a.message_id, a.filename, a.mime_type, a.size
+       FROM attachments a JOIN messages m ON m.id = a.message_id
+      WHERE m.thread_id = ?`
+  ).bind(id).all<{ id: number; message_id: number; filename: string; mime_type: string; size: number }>();
 
   return {
     id,
@@ -137,6 +144,7 @@ export async function getThread(db: D1Database, id: number): Promise<ThreadDetai
       receivedAt: m.received_at,
       isRead: Boolean(m.is_read),
       parseError: Boolean(m.parse_error),
+      bodyTruncated: Boolean(m.body_truncated),
       attachments: attachments.results.filter((a) => a.message_id === m.id)
         .map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mime_type, size: a.size })),
     })),

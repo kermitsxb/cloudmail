@@ -32,7 +32,14 @@ CREATE TABLE messages (
   is_read INTEGER NOT NULL DEFAULT 0,
   has_attachments INTEGER NOT NULL DEFAULT 0,
   raw_key TEXT NOT NULL,
-  parse_error INTEGER NOT NULL DEFAULT 0
+  parse_error INTEGER NOT NULL DEFAULT 0,
+  -- Corps tronqué à l'insertion parce qu'il dépassait la borne de taille (voir
+  -- MAX_BODY_BYTES dans src/ingest/store.ts). Colonne distincte de parse_error, qui
+  -- signifie « le MIME n'a pas été compris » : ici le message a été parfaitement
+  -- parsé, seul son corps stocké en D1 est incomplet. Les deux se traitent
+  -- différemment côté lecture (un corps tronqué reste lisible ; le brut complet
+  -- reste dans R2 sous raw_key).
+  body_truncated INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_messages_folder ON messages(folder, received_at DESC);
 CREATE INDEX idx_messages_thread ON messages(thread_id);
@@ -51,9 +58,9 @@ CREATE INDEX idx_recipients_address ON recipients(address);
 CREATE TABLE attachments (
   id INTEGER PRIMARY KEY,
   message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  filename TEXT,
-  mime_type TEXT,
-  size INTEGER,
+  filename TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size INTEGER NOT NULL,
   content_id TEXT,
   r2_key TEXT NOT NULL
 );
