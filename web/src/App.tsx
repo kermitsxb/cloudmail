@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useThreads } from "./api/client";
 import { Sidebar } from "./components/Sidebar";
 import { ThreadList } from "./components/ThreadList";
+import { ThreadView } from "./components/ThreadView";
 
 const queryClient = new QueryClient();
 
@@ -42,7 +43,7 @@ function Mailbox() {
         {selectedThreadId === null ? (
           <p className="m-auto text-sm text-muted-foreground">Sélectionnez une conversation.</p>
         ) : (
-          <p className="m-auto text-sm text-muted-foreground">Conversation #{selectedThreadId}</p>
+          <ThreadView threadId={selectedThreadId} />
         )}
       </div>
     </div>
