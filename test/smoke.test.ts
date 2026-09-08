@@ -2,8 +2,8 @@ import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 describe("harnais", () => {
-  it("sert /api/health", async () => {
-    const res = await SELF.fetch("https://example.com/api/health");
+  it("sert /healthz", async () => {
+    const res = await SELF.fetch("https://example.com/healthz");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
   });

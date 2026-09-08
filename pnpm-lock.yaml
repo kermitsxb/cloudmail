@@ -11,6 +11,9 @@ importers:
       hono:
         specifier: ^4.13.7
         version: 4.13.7
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
       postal-mime:
         specifier: ^3.0.0
         version: 3.0.0
@@ -741,6 +744,9 @@ packages:
   hono@4.13.7:
     resolution: {integrity: sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ==}
     engines: {node: '>=16.9.0'}
+
+  jose@6.2.12:
+    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
 
   kleur@4.1.5:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
@@ -1523,6 +1529,8 @@ snapshots:
     optional: true
 
   hono@4.13.7: {}
+
+  jose@6.2.12: {}
 
   kleur@4.1.5: {}
 
