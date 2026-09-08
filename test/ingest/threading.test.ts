@@ -52,6 +52,29 @@ describe("resolveThread", () => {
     expect(t?.subject_norm).toBe("facture");
   });
 
+  // Régression : la requête de rattrapage par sujet liait 2 + 2 × participants paramètres,
+  // alors que D1 en plafonne 100 par requête. Un message à 60 participants (liste de
+  // diffusion, longue chaîne en répondre-à-tous) faisait donc lever resolveThread — et avec
+  // elle storeIncoming, dont l'erreur est avalée par handleEmail : le message n'existait plus
+  // que dans R2, sans ligne D1.
+  const manyParticipants = (n: number) =>
+    Array.from({ length: n }, (_, i) => `p${i}@example.com`);
+
+  it("supporte 60 participants sans dépasser la limite de paramètres liés D1", async () => {
+    const r = await resolveThread(env.DB, msg({}), manyParticipants(60));
+    expect(r.created).toBe(true);
+  });
+
+  it("rattache par sujet même avec 60 participants", async () => {
+    await seed("<parent@x>", "facture", 11);
+    const r = await resolveThread(
+      env.DB,
+      msg({ messageId: "<m3@x>", subject: "Re: Facture" }),
+      [...manyParticipants(60), "zoe@example.com"],
+    );
+    expect(r).toEqual({ threadId: 11, created: false });
+  });
+
   it("rattache via In-Reply-To", async () => {
     await seed("<parent@x>", "facture", 7);
     const r = await resolveThread(env.DB, msg({ messageId: "<m2@x>", inReplyTo: "<parent@x>" }), []);

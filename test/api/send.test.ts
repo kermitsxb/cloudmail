@@ -1,6 +1,7 @@
 import { env, applyD1Migrations } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../../src/index";
+import { getThread } from "../../src/db/queries";
 
 interface TestEnv {
   DB: D1Database;
@@ -17,6 +18,8 @@ beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM messages"),
     env.DB.prepare("DELETE FROM threads"),
+    env.DB.prepare("DELETE FROM attachments"),
+    env.DB.prepare("DELETE FROM recipients"),
     env.DB.prepare("DELETE FROM identities"),
   ]);
   await env.DB.prepare(
@@ -106,5 +109,40 @@ describe("POST /api/messages", () => {
     );
     const res = await post(valid);
     expect(await res.json()).toMatchObject({ permanentBounces: ["zoe@example.com"] });
+  });
+});
+
+describe("POST /api/messages — pièces jointes du message envoyé", () => {
+  // Régression : has_attachments passait à 1 d'après req.attachments.length, mais aucune
+  // ligne `attachments` n'était insérée et aucun octet n'était écrit dans R2. La liste des
+  // conversations affichait donc un trombone pour une conversation qui n'en montrait aucune
+  // une fois ouverte, et l'utilisateur n'avait aucune copie de ce qu'il avait envoyé.
+  it("persiste la ligne, l'objet R2, et les renvoie via getThread", async () => {
+    ok();
+    const res = await post({
+      ...valid,
+      attachments: [
+        { filename: "rapport final.pdf", mimeType: "application/pdf", contentBase64: btoa("%PDF-1.7") },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const { id } = await res.json<{ id: number }>();
+
+    const att = await env.DB.prepare(
+      "SELECT filename, mime_type, size, r2_key FROM attachments WHERE message_id = ?"
+    ).bind(id).first<{ filename: string; mime_type: string; size: number; r2_key: string }>();
+    expect(att).toMatchObject({ filename: "rapport final.pdf", mime_type: "application/pdf", size: 8 });
+    expect(att?.r2_key).toMatch(/^att\/sent-[A-Za-z0-9._-]+\/0-rapport-final.pdf$/);
+
+    const obj = await env.MAIL.get(att!.r2_key);
+    expect(obj).not.toBeNull();
+    expect(new TextDecoder().decode(await obj!.arrayBuffer())).toBe("%PDF-1.7");
+
+    const threadId = (await env.DB.prepare("SELECT thread_id FROM messages WHERE id = ?")
+      .bind(id).first<{ thread_id: number }>())!.thread_id;
+    const thread = await getThread(env.DB, threadId);
+    expect(thread?.messages[0].attachments).toEqual([
+      { id: expect.any(Number), filename: "rapport final.pdf", mimeType: "application/pdf", size: 8 },
+    ]);
   });
 });

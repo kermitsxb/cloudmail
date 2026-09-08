@@ -144,6 +144,39 @@ describe("getThread", () => {
     expect(t?.messages[0].attachments).toEqual([{ id: 1, filename: "f.pdf", mimeType: "application/pdf", size: 42 }]);
   });
 
+  // Régression : la requête des destinataires et celle des pièces jointes énuméraient un
+  // paramètre lié par message, deux fois. D1 plafonne à 100 paramètres liés par requête, donc
+  // au-delà de 100 messages dans un fil, GET /api/threads/:id échouait définitivement — le fil
+  // devenait inouvrable. 120 messages dépasse la limite d'avant correction.
+  it("ouvre un fil de plus de 100 messages (limite de paramètres liés D1)", async () => {
+    await insertThread(1, "gros fil", 100);
+    const statements = [];
+    for (let i = 1; i <= 120; i++) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO messages (id, thread_id, message_id, direction, folder, from_addr, subject, text_body, snippet, received_at, raw_key)
+           VALUES (?, 1, ?, 'in', 'inbox', 'zoe@example.com', 'Facture', 'corps', 'corps', ?, 'raw/x.eml')`
+        ).bind(i, `<big${i}@x>`, 1000 + i)
+      );
+      statements.push(
+        env.DB.prepare(
+          "INSERT INTO recipients (message_id, kind, address, name) VALUES (?, 'to', 'thomas@planigramme.fr', NULL)"
+        ).bind(i)
+      );
+    }
+    statements.push(
+      env.DB.prepare(
+        "INSERT INTO attachments (message_id, filename, mime_type, size, r2_key) VALUES (120, 'f.pdf', 'application/pdf', 42, 'att/x/0-f.pdf')"
+      )
+    );
+    await env.DB.batch(statements);
+
+    const t = await getThread(env.DB, 1);
+    expect(t?.messages).toHaveLength(120);
+    expect(t?.messages[0].to).toEqual([{ address: "thomas@planigramme.fr", name: null }]);
+    expect(t?.messages[119].attachments).toHaveLength(1);
+  });
+
   it("retourne null pour un thread inexistant", async () => {
     expect(await getThread(env.DB, 999)).toBeNull();
   });
@@ -237,7 +270,7 @@ describe("GET /api/messages/:id/body", () => {
       "UPDATE messages SET html_body = ? WHERE id = 1"
     ).bind(`<img src="cid:logo123">`).run();
     await env.DB.prepare(
-      "INSERT INTO attachments (message_id, filename, content_id, r2_key) VALUES (1, 'logo.png', 'logo123', 'att/1/0-logo.png')"
+      "INSERT INTO attachments (message_id, filename, mime_type, size, content_id, r2_key) VALUES (1, 'logo.png', 'image/png', 12, 'logo123', 'att/1/0-logo.png')"
     ).run();
 
     const res = await app.request("https://example.com/api/messages/1/body", {}, { ...env, DEV_BYPASS_AUTH: "1" });
