@@ -1,4 +1,8 @@
+import { useState } from "react";
 import { useIdentities } from "../api/client";
+import { Composer } from "./Composer";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 const FOLDERS: { id: string; label: string }[] = [
   { id: "inbox", label: "Boîte de réception" },
@@ -14,9 +18,23 @@ export function Sidebar({
   onSelectFolder: (folder: string) => void;
 }) {
   const { data: identities } = useIdentities();
+  const [composerOpen, setComposerOpen] = useState(false);
 
   return (
     <nav aria-label="Dossiers" className="flex h-full flex-col gap-6 border-r border-border p-4">
+      <Button type="button" onClick={() => setComposerOpen(true)}>
+        Nouveau message
+      </Button>
+
+      <Dialog open={composerOpen} onOpenChange={setComposerOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nouveau message</DialogTitle>
+          </DialogHeader>
+          <Composer mode="new" onClose={() => setComposerOpen(false)} />
+        </DialogContent>
+      </Dialog>
+
       <ul className="flex flex-col gap-1">
         {FOLDERS.map((f) => (
           <li key={f.id}>
