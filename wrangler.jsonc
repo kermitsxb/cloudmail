@@ -16,10 +16,10 @@
     {
       "binding": "DB",
       "database_name": "cloudmail",
-      // Placeholder : la vraie ressource D1 distante sera créée avec l'utilisateur dans une
-      // tâche ultérieure (`wrangler d1 create cloudmail`). En attendant, "local" suffit :
-      // Miniflare fournit D1 et R2 en local pour `wrangler dev` et les tests Vitest, sans
-      // authentification Cloudflare.
+      // Placeholder : à remplacer par l'identifiant réel de la base D1 distante lors de la
+      // mise en service (voir la section « Mise en service » du README, étape 1). En
+      // attendant, "local" suffit : Miniflare fournit D1 et R2 en local pour `wrangler dev`
+      // et les tests Vitest, sans authentification Cloudflare.
       "database_id": "local",
       "migrations_dir": "migrations"
     }

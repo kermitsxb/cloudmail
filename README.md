@@ -77,7 +77,25 @@ données fonctionnelle. Le placeholder `"local"` ne fonctionne qu'en local, où
 Miniflare simule D1 sans authentification Cloudflare — voir le commentaire dans
 `wrangler.jsonc`.
 
-### 2. Vérifier le domaine dans Email Service
+### 2. Premier déploiement (fait exister le Worker)
+
+```bash
+pnpm deploy
+```
+
+Ce premier déploiement n'a qu'un but : faire exister le Worker `cloudmail` sur
+le compte Cloudflare. Il est nécessaire ici, avant même la configuration
+d'Access et des secrets d'envoi, parce que l'étape 4 (Email Routing) doit
+choisir ce Worker dans une liste déroulante du tableau de bord — et cette
+liste ne propose que des Workers déjà déployés. Sans ce premier déploiement,
+l'étape 4 est une impasse : la liste est vide et il n'y a rien à sélectionner.
+
+À ce stade, le Worker déployé est incomplet (secrets d'envoi absents,
+`ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` encore vides) : c'est normal, aucun trafic
+réel n'est encore attendu. Un second déploiement, final, aura lieu à l'étape 10
+une fois toute la configuration en place.
+
+### 3. Vérifier le domaine dans Email Service
 
 Tableau de bord Cloudflare → Email → Email Service → Sending → ajouter
 `planigramme.fr` et publier les enregistrements DNS demandés (SPF/DKIM). Attendre
@@ -88,17 +106,18 @@ via l'API Cloudflare Email Sending. Si elle est oubliée ou incomplète, tout
 envoi via `src/send/client.ts` échoue (l'API Cloudflare rejette les messages
 provenant d'un domaine non vérifié).
 
-### 3. Activer Email Routing avec une règle catch-all
+### 4. Activer Email Routing avec une règle catch-all
 
 Tableau de bord Cloudflare → Email → Email Routing → activer, puis créer une
-règle catch-all « Send to a Worker » pointant sur le Worker `cloudmail`.
+règle catch-all « Send to a Worker » pointant sur le Worker `cloudmail` (visible
+dans la liste grâce au déploiement de l'étape 2).
 
 Cette étape produit le déclenchement du handler `email()` (`src/email.ts`) pour
 tout message reçu sur `*@planigramme.fr`. Si elle est oubliée, aucun message
 entrant n'atteint jamais Cloudmail : Cloudflare les rejette ou les jette selon
 la configuration DNS MX en place.
 
-### 4. Créer l'application Cloudflare Access
+### 5. Créer l'application Cloudflare Access
 
 Zero Trust → Access → Applications → Self-hosted, domaine `mail.planigramme.fr`,
 politique « Emails » limitée à `thomas.stocker.pro@gmail.com`. Copier ensuite
@@ -118,9 +137,10 @@ Access valide, `src/auth/access.ts` (`requireAccess()`) rejette toute requête
 API avec `401 unauthenticated`. Si `ACCESS_TEAM_DOMAIN` ou `ACCESS_AUD` sont
 laissés vides (leur valeur par défaut dans `wrangler.jsonc`), la vérification
 JWT échoue systématiquement et personne — pas même l'utilisateur légitime — ne
-peut se connecter.
+peut se connecter. (Ces valeurs ne seront effectivement appliquées qu'au
+second déploiement, étape 10.)
 
-### 5. Créer un token API restreint à l'envoi d'emails
+### 6. Créer un token API restreint à l'envoi d'emails
 
 Tableau de bord Cloudflare → créer un token API avec la seule permission
 « Email Sending: Send » (aucune autre permission — ce token ne doit pas pouvoir
@@ -131,7 +151,7 @@ Cette étape produit le jeton utilisé par `src/send/client.ts` pour appeler
 un risque inutile en cas de fuite ; un token absent ou mal scopé fait échouer
 tout envoi avec une erreur d'autorisation Cloudflare.
 
-### 6. Poser les secrets
+### 7. Poser les secrets
 
 ```bash
 pnpm wrangler secret put CF_ACCOUNT_ID
@@ -142,7 +162,7 @@ Ces deux commandes produisent les secrets chiffrés lus par `src/send/client.ts`
 via `env.CF_ACCOUNT_ID` et `env.CF_API_TOKEN`. Sans eux, toute tentative de
 réponse ou d'envoi échoue immédiatement au moment de l'appel à l'API Cloudflare.
 
-### 7. Appliquer les migrations en distant
+### 8. Appliquer les migrations en distant
 
 ```bash
 pnpm wrangler d1 migrations apply cloudmail --remote
@@ -153,7 +173,7 @@ dans `migrations/0001_initial.sql` sur la base D1 distante. Si elle est
 oubliée, la première requête du Worker déployé contre D1 échoue avec une erreur
 « no such table ».
 
-### 8. Peupler la table `identities`
+### 9. Peupler la table `identities`
 
 ```bash
 pnpm wrangler d1 execute cloudmail --remote --command \
@@ -164,17 +184,19 @@ Cette étape crée l'identité d'envoi par défaut. Sans ligne dans `identities`
 l'API n'a aucune adresse `From` à proposer pour composer ou répondre à un
 message.
 
-### 9. Déployer
+### 10. Déploiement final
 
 ```bash
 pnpm deploy
 ```
 
-Cette commande construit le SPA puis déploie le Worker (code, assets, route
-`mail.planigramme.fr` définie dans `wrangler.jsonc`) sur Cloudflare. C'est la
-seule étape qui rend le service effectivement joignable en production ; tant
-qu'elle n'a pas été exécutée après les étapes précédentes, `mail.planigramme.fr`
-ne répond pas (ou répond avec une configuration incomplète).
+Second et dernier déploiement : cette fois le Worker part avec les secrets
+d'envoi posés (étape 7), les variables `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD`
+renseignées (étape 5) et une base D1 migrée et peuplée (étapes 8-9). C'est
+cette exécution qui rend le service effectivement utilisable en production ;
+tant qu'elle n'a pas eu lieu après les étapes précédentes, l'authentification
+Access et l'envoi d'email restent non fonctionnels malgré un Worker déjà en
+ligne depuis l'étape 2.
 
 ## Rejeu d'un message (`reparse`)
 
@@ -182,14 +204,38 @@ ne répond pas (ou répond avec une configuration incomplète).
 brut déjà stocké dans R2 (clé `rawKey`), le re-parse, supprime la ligne D1
 existante correspondante (en décrémentant au passage les compteurs du thread
 d'origine) puis rappelle `storeIncoming` comme si le message venait d'arriver.
-C'est l'outil à utiliser pour rejouer un message après un correctif du parseur,
-sans avoir à faire renvoyer l'email par l'expéditeur d'origine.
+C'est la fonction à utiliser pour rejouer un message après un correctif du
+parseur, sans avoir à faire renvoyer l'email par l'expéditeur d'origine.
 
-**Limite connue** : si le message rejoué était le seul message d'un thread,
-`storeIncoming` recrée un nouveau thread pour lui (le threading se base sur le
-sujet normalisé et les en-têtes de référence au moment du re-parsing, pas sur
-l'ancien `thread_id`) ; l'ancien thread, désormais vide, reste orphelin en base
-plutôt que d'être supprimé. Ce cas doit être nettoyé manuellement si besoin.
+**Aucun point d'entrée n'est livré aujourd'hui.** `reparse` n'est appelée nulle
+part dans le code : ni route API, ni script, ni commande `wrangler`. Elle
+existe et est testée, mais rien dans l'application déployée ne permet de la
+déclencher. Pour l'invoquer malgré tout, il faut s'en donner un temporairement :
+
+1. Ajouter localement, dans `src/api/routes.ts`, une route authentifiée (donc
+   passant par `requireAccess()` comme les autres) qui appelle
+   `reparse(c.env, rawKey, envelopeFrom)` avec des paramètres fournis par la
+   requête ou codés en dur pour l'usage ponctuel.
+2. Lancer `pnpm wrangler dev --remote` pour que ce Worker de développement
+   local s'exécute contre les bindings D1/R2 **distants** réels (et non contre
+   les simulations locales de Miniflare) — sans quoi le rejeu ne toucherait
+   que des données locales éphémères.
+3. Déclencher la route pour effectuer le rejeu.
+4. Retirer la route ajoutée à l'étape 1 avant de committer ou de redéployer.
+
+**Cette route ne doit jamais être déployée en production.** `reparse`
+supprime puis réinsère une ligne de `messages` (et ajuste les compteurs du
+thread concerné) : c'est une opération destructive exécutée sans confirmation
+ni garde-fou particulier au-delà de l'authentification Access générique.
+L'exposer durablement sur une application accessible depuis Internet mérite
+son propre cycle de conception et de revue, pas un ajout de dernière minute.
+
+**Limite connue de `reparse` elle-même** : si le message rejoué était le seul
+message d'un thread, `storeIncoming` recrée un nouveau thread pour lui (le
+threading se base sur le sujet normalisé et les en-têtes de référence au
+moment du re-parsing, pas sur l'ancien `thread_id`) ; l'ancien thread,
+désormais vide, reste orphelin en base plutôt que d'être supprimé. Ce cas doit
+être nettoyé manuellement si besoin.
 
 ## Stockage du MIME brut
 
