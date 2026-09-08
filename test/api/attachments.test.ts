@@ -32,6 +32,12 @@ beforeAll(async () => {
   await env.MAIL.put("raw/att.eml", "From: a@b.c\r\n\r\nbonjour");
 });
 
+// Les corps de ces réponses sont binaires (flux R2) : les lire avec .text() fait émettre à
+// workerd un avertissement à chaque exécution de la suite. On passe par arrayBuffer() puis on
+// décode explicitement, pour garder une sortie de test sans le moindre avertissement.
+const bodyText = async (res: Response): Promise<string> =>
+  new TextDecoder().decode(await res.arrayBuffer());
+
 const testEnvWithBypass = () => ({ ...env, DEV_BYPASS_AUTH: "1" });
 const authed = (path: string) => app.request(`https://example.com${path}`, {}, testEnvWithBypass());
 
@@ -39,7 +45,7 @@ describe("GET /api/attachments/:id", () => {
   it("retourne le contenu avec un nom de fichier échappé", async () => {
     const res = await authed("/api/attachments/1");
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe("%PDF%");
+    expect(await bodyText(res)).toBe("%PDF%");
     expect(res.headers.get("content-disposition")).toContain('filename="rapport final.pdf"');
   });
 
@@ -150,7 +156,7 @@ describe("GET /api/messages/:id/raw", () => {
     const res = await authed("/api/messages/1/raw");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("message/rfc822");
-    expect(await res.text()).toContain("bonjour");
+    expect(await bodyText(res)).toContain("bonjour");
   });
 
   it("force le téléchargement (Content-Disposition: attachment), jamais un rendu inline", async () => {
@@ -184,5 +190,24 @@ describe("GET /api/messages/:id/raw", () => {
   it("répond 401 sans jeton", async () => {
     const res = await app.request("https://example.com/api/messages/1/raw", {}, { ...env, DEV_BYPASS_AUTH: undefined });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/attachments/:id — nom de fichier démesuré", () => {
+  // Régression : le nom vient de l'expéditeur et n'a aucune borne en MIME ; encodeURIComponent
+  // pouvant tripler sa taille, un nom de 50 000 caractères produisait un Content-Disposition
+  // d'environ 150 Ko et rendait la pièce jointe définitivement intéléchargeable.
+  it("tronque le nom avant les deux encodages", async () => {
+    await env.DB.prepare("UPDATE attachments SET filename = ? WHERE id = 1")
+      .bind("é".repeat(50_000) + ".pdf").run();
+
+    const res = await authed("/api/attachments/1");
+    expect(res.status).toBe(200);
+    const disp = res.headers.get("content-disposition") ?? "";
+    // 200 caractères, pourcent-encodés sur 9 octets max chacun, plus les paramètres : très
+    // largement sous le kilo-octet, alors que l'en-tête faisait ~150 Ko avant correction.
+    expect(disp.length).toBeLessThan(2000);
+
+    await env.DB.prepare("UPDATE attachments SET filename = 'rapport final.pdf' WHERE id = 1").run();
   });
 });

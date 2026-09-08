@@ -83,7 +83,13 @@ export async function sanitizeHtml(html: string, opts: SanitizeOptions): Promise
         const src = el.getAttribute("src");
         if (!src) return;
         if (src.toLowerCase().startsWith("cid:")) {
-          const id = opts.cidMap[src.slice(4)];
+          // Object.hasOwn et non un simple accès : cidMap est un objet ordinaire (construit
+          // par Object.fromEntries), donc `cidMap["constructor"]` ou `cidMap["toString"]`
+          // remonte la chaîne de prototypes et renvoie une valeur non `undefined`. Un
+          // <img src="cid:constructor"> était alors réécrit vers /api/attachments/<valeur
+          // héritée> au lieu d'être supprimé.
+          const cid = src.slice(4);
+          const id = Object.hasOwn(opts.cidMap, cid) ? opts.cidMap[cid] : undefined;
           if (id === undefined) el.remove();
           else el.setAttribute("src", `/api/attachments/${id}`);
           return;
