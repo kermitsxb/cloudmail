@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 import type { Env } from "./env";
 import { handleEmail } from "./email";
 import { requireAccess } from "./auth/access";
@@ -13,7 +14,16 @@ app.get("/healthz", (c) => c.json({ ok: true }));
 // charge que ses propres scripts/styles ; l'iframe de corps de message est en srcDoc
 // (donc "self" pour frame-src) et peut charger des images distantes une fois que
 // l'utilisateur a explicitement choisi de les afficher — d'où img-src élargi à https:.
-app.use("*", async (c, next) => {
+//
+// IMPORTANT : ce middleware NE couvre PAS le document du SPA (index.html) ni ses
+// assets. `wrangler.jsonc` sert ces réponses directement depuis le binding ASSETS
+// (`run_worker_first` ne liste que "/api/*" et "/healthz"), donc elles ne traversent
+// jamais ce code — la garde `content-type: text/html` ci-dessous ne matche alors
+// jamais rien. Les mêmes en-têtes sont donc dupliqués dans `web/public/_headers`
+// (recopié tel quel dans `web/dist` par Vite), qui est la seule couche qui atteint
+// réellement le document SPA. Ce middleware reste une défense en profondeur gratuite
+// pour toute réponse HTML que le Worker générerait lui-même.
+export const securityHeaders = (): MiddlewareHandler<{ Bindings: Env }> => async (c, next) => {
   await next();
   if (c.res.headers.get("content-type")?.includes("text/html")) {
     c.res.headers.set(
@@ -25,7 +35,9 @@ app.use("*", async (c, next) => {
     c.res.headers.set("x-content-type-options", "nosniff");
     c.res.headers.set("referrer-policy", "no-referrer");
   }
-});
+};
+
+app.use("*", securityHeaders());
 
 app.use("/api/*", requireAccess());
 
