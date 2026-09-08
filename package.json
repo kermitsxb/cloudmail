@@ -5,7 +5,10 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "vitest run",
+    "dev": "concurrently \"pnpm wrangler dev\" \"pnpm --filter web dev\"",
+    "build": "pnpm --filter web build",
+    "deploy": "pnpm build && pnpm wrangler deploy",
+    "test": "vitest run && pnpm --filter web test",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
@@ -27,6 +30,7 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.1.5",
     "@cloudflare/workers-types": "^5.20260908.1",
+    "concurrently": "^10.0.5",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
     "wrangler": "^4.129.1"
