@@ -1,0 +1,19 @@
+From: a@example.com
+To: thomas@example.com
+Subject: Image inline
+Message-ID: <inline-1@example.com>
+Date: Mon, 08 Sep 2026 13:00:00 +0200
+Content-Type: multipart/related; boundary="b3"
+
+--b3
+Content-Type: text/html; charset=utf-8
+
+<p>Logo : <img src="cid:logo123"></p>
+--b3
+Content-Type: image/png
+Content-ID: <logo123>
+Content-Disposition: inline; filename="logo.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--b3--

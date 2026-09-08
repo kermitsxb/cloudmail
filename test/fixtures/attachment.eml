@@ -1,0 +1,18 @@
+From: a@example.com
+To: thomas@example.com
+Subject: Avec PJ
+Message-ID: <att-1@example.com>
+Date: Mon, 08 Sep 2026 12:00:00 +0200
+Content-Type: multipart/mixed; boundary="b2"
+
+--b2
+Content-Type: text/plain; charset=utf-8
+
+Voir la pièce jointe.
+--b2
+Content-Type: text/csv; name="data.csv"
+Content-Disposition: attachment; filename="data.csv"
+Content-Transfer-Encoding: base64
+
+YSxiLGMKMSwyLDMK
+--b2--
