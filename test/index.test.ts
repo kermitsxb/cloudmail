@@ -1,6 +1,7 @@
+import { env } from "cloudflare:test";
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
-import { securityHeaders } from "../src/index";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { app, securityHeaders } from "../src/index";
 // Import brut (résolu au build, sans dépendre du système de fichiers hôte dans
 // l'environnement workerd des tests) : garantit qu'une suppression accidentelle de
 // web/public/_headers, ou de ses en-têtes, fait échouer la suite.
@@ -40,5 +41,39 @@ describe("web/public/_headers (couvre le document du SPA, hors-Worker)", () => {
     expect(headersFile).toContain("img-src 'self' data: https:");
     expect(headersFile).toContain("X-Content-Type-Options: nosniff");
     expect(headersFile).toContain("Referrer-Policy: no-referrer");
+  });
+});
+
+describe("app.onError (contrat d'erreur uniforme)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  // Régression : sans onError, toute exception non rattrapée dans une route renvoyait
+  // « Internal Server Error » en texte brut, alors que tout le reste de l'API répond
+  // { error: { code, message } }.
+  it("renvoie la forme standard { error: { code, message } } en 500", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // Binding DB retiré : la route lève à la première utilisation de c.env.DB.
+    const res = await app.request(
+      "https://example.com/api/identities",
+      {},
+      { ...env, DB: undefined, DEV_BYPASS_AUTH: "1" },
+    );
+
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = await res.json<{ error: { code: string; message: string } }>();
+    expect(body.error.code).toBe("internal_error");
+    expect(body.error.message).toBe("Erreur interne");
+  });
+
+  it("ne divulgue pas le détail interne de l'exception", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await app.request(
+      "https://example.com/api/identities",
+      {},
+      { ...env, DB: undefined, DEV_BYPASS_AUTH: "1" },
+    );
+    const text = JSON.stringify(await res.json());
+    expect(text).not.toMatch(/prepare|undefined|TypeError/);
   });
 });

@@ -323,3 +323,25 @@ describe("sanitizeHtml", () => {
     expect(outlook.html).toContain("texte outlook");
   });
 });
+
+describe("sanitizeHtml — cid: et chaîne de prototypes", () => {
+  // Régression : `cidMap[cid]` sur un objet ordinaire remonte la chaîne de prototypes.
+  // <img src="cid:constructor"> résolvait vers une valeur héritée non `undefined`, et l'image
+  // était réécrite vers /api/attachments/<valeur héritée> au lieu d'être supprimée.
+  it("supprime une image cid:constructor plutôt que de la réécrire", async () => {
+    const { html } = await clean(`<img src="cid:constructor">`, { logo123: 7 });
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("/api/attachments/");
+  });
+
+  it("supprime une image cid:toString plutôt que de la réécrire", async () => {
+    const { html } = await clean(`<img src="cid:toString">`, { logo123: 7 });
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("/api/attachments/");
+  });
+
+  it("réécrit toujours un cid: réellement présent dans la table", async () => {
+    const { html } = await clean(`<img src="cid:logo123">`, { logo123: 7 });
+    expect(html).toContain('src="/api/attachments/7"');
+  });
+});
