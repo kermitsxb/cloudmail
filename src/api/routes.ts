@@ -213,8 +213,15 @@ function safeAsciiFilename(name: string): string {
   return sanitized || "fichier";
 }
 
+// Le nom de fichier vient de l'expéditeur et n'a aucune borne de longueur en MIME. Sans
+// plafond ici, un nom de 50 000 caractères produit un Content-Disposition d'environ 150 Ko
+// une fois pourcent-encodé (encodeURIComponent peut tripler la taille), au-delà de ce que
+// les serveurs et navigateurs acceptent comme en-tête : la pièce jointe devient
+// définitivement intéléchargeable. On tronque donc AVANT les deux encodages.
+const MAX_FILENAME_CHARS = 200;
+
 function contentDispositionFor(filename: string): string {
-  const name = filename || "fichier";
+  const name = (filename || "fichier").slice(0, MAX_FILENAME_CHARS);
   const asciiName = safeAsciiFilename(name);
   const utf8Name = encodeURIComponent(name);
   return `attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`;

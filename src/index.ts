@@ -43,6 +43,19 @@ app.use("/api/*", requireAccess());
 
 app.route("/api", api);
 
+// Contrat d'erreur uniforme : toute exception non rattrapée dans une route renverrait
+// sinon un « 500 Internal Server Error » en texte brut, alors que tout le reste de l'API
+// répond { error: { code, message } }. Le détail interne (message d'exception, pile) n'est
+// pas divulgué au client — il part dans les logs du Worker, seule surface de diagnostic.
+app.onError((err, c) => {
+  console.error(JSON.stringify({
+    event: "unhandled_error",
+    path: new URL(c.req.url).pathname,
+    error: err instanceof Error ? err.message : String(err),
+  }));
+  return c.json({ error: { code: "internal_error", message: "Erreur interne" } }, 500);
+});
+
 export { app };
 
 export default {
