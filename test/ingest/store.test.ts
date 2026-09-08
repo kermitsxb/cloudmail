@@ -37,7 +37,7 @@ describe("storeIncoming", () => {
   it("écrit le MIME brut dans R2 et le message dans D1", async () => {
     const res = await storeIncoming(env, await load("simple.eml"), envelope);
     expect(res.duplicate).toBe(false);
-    expect(res.rawKey).toBe("raw/simple-1-example.com.eml");
+    expect(res.rawKey).toMatch(/^raw\/[0-9a-f]{64}\.eml$/);
 
     const obj = await env.MAIL.get(res.rawKey);
     expect(obj).not.toBeNull();
@@ -113,8 +113,25 @@ describe("storeIncoming", () => {
 
   it("écrit le brut dans R2 même si l'insertion D1 échoue", async () => {
     const broken = { ...env, DB: { prepare: () => { throw new Error("d1 down"); } } } as unknown as typeof env;
-    await expect(storeIncoming(broken, await load("simple.eml"), envelope)).rejects.toThrow();
-    const obj = await env.MAIL.get("raw/simple-1-example.com.eml");
+    const raw = await load("simple.eml");
+    await expect(storeIncoming(broken, raw, envelope)).rejects.toThrow();
+    const digest = await crypto.subtle.digest("SHA-256", raw);
+    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const obj = await env.MAIL.get(`raw/${hex}.eml`);
+    expect(obj).not.toBeNull();
+  });
+
+  it("écrit le brut dans R2 même si parseEmail échoue", async () => {
+    // malformed.eml déclenche le fallback interne de parseEmail, qui appelle
+    // envelopeFrom.toLowerCase() : un envelope.from non conforme y fait lever
+    // une exception. C'est ce test qui atteste l'invariant réel : le brut est
+    // dans R2 avant tout appel à parseEmail, quoi qu'il arrive ensuite.
+    const raw = await load("malformed.eml");
+    const badEnvelope = { from: null as unknown as string, to: "thomas@example.com" };
+    await expect(storeIncoming(env, raw, badEnvelope)).rejects.toThrow();
+    const digest = await crypto.subtle.digest("SHA-256", raw);
+    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const obj = await env.MAIL.get(`raw/${hex}.eml`);
     expect(obj).not.toBeNull();
   });
 });

@@ -7,20 +7,26 @@ export type StoreResult = { messageId: number | null; duplicate: boolean; rawKey
 const sanitizeFilename = (name: string): string =>
   name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "fichier";
 
+const sha256Hex = async (data: ArrayBuffer): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+
 export async function storeIncoming(
   env: Env,
   raw: ArrayBuffer,
   envelope: { from: string; to: string },
 ): Promise<StoreResult> {
-  // parseEmail ne lève jamais : un message illisible produit un ParsedMessage
-  // avec parseError = true plutôt qu'une exception.
+  // La clé est dérivée du brut lui-même (SHA-256 des octets), pas du message
+  // parsé : l'écriture R2 précède ainsi structurellement tout appel à
+  // parseEmail. Un même brut redélivré écrit le même objet (adressage par
+  // contenu), et même si parseEmail venait à lever, le message est déjà
+  // rejouable depuis R2.
+  const rawKey = `raw/${await sha256Hex(raw)}.eml`;
+  await env.MAIL.put(rawKey, raw);
+
   const msg = await parseEmail(raw, envelope.from);
   const key = safeKey(msg.messageId);
-  const rawKey = `raw/${key}.eml`;
-
-  // Le brut est écrit AVANT tout accès D1 : un message reste toujours rejouable
-  // même si le parsing ou l'écriture D1 échoue ensuite.
-  await env.MAIL.put(rawKey, raw);
 
   const participants = [
     msg.from.address,
