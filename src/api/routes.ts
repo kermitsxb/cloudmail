@@ -3,8 +3,9 @@ import { z } from "zod";
 import type { Env } from "../env";
 import type { AccessIdentity } from "../auth/access";
 import { getThread, listIdentities, listThreads } from "../db/queries";
-import { moveToFolder, purgeMessage, setRead } from "../db/mutations";
+import { moveToFolder, purgeMessage, setRead, storeOutgoing } from "../db/mutations";
 import { sanitizeHtml } from "../html/sanitize";
+import { MAX_PAYLOAD_BYTES, SendError, payloadSize, sendEmail, type SendRequest } from "../send/client";
 
 export type ApiEnv = { Bindings: Env; Variables: { identity: AccessIdentity } };
 
@@ -23,6 +24,21 @@ const patchBody = z.object({
   folder: z.enum(["inbox", "sent", "trash"]).optional(),
 }).refine((b) => b.isRead !== undefined || b.folder !== undefined, {
   message: "Fournir isRead ou folder",
+});
+
+const sendBody = z.object({
+  from: z.string().email(),
+  to: z.array(z.string().email()).min(1).max(20),
+  cc: z.array(z.string().email()).max(20).optional(),
+  subject: z.string().max(500),
+  text: z.string(),
+  html: z.string().optional(),
+  inReplyTo: z.string().max(500).optional(),
+  attachments: z.array(z.object({
+    filename: z.string().max(200),
+    mimeType: z.string().max(120),
+    contentBase64: z.string(),
+  })).max(10).optional(),
 });
 
 export const api = new Hono<ApiEnv>();
@@ -44,6 +60,58 @@ api.get("/threads/:id", async (c) => {
 });
 
 api.get("/identities", async (c) => c.json(await listIdentities(c.env.DB)));
+
+// Envoie un email via l'API Cloudflare Email Sending puis, seulement si l'envoi a réussi,
+// stocke une copie du message dans le dossier "sent". Le CF_API_TOKEN utilisé par sendEmail
+// n'apparaît jamais ici : ni dans les logs (aucun log n'est émis sur ce chemin), ni dans les
+// réponses d'erreur (SendError ne porte que le message renvoyé par l'API Cloudflare elle-même).
+api.post("/messages", async (c) => {
+  const parsed = sendBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: { code: "invalid_body", message: parsed.error.issues[0].message } }, 400);
+  }
+
+  // L'expéditeur doit être une identité connue : un `from` arbitraire est refusé avant tout
+  // appel réseau, donc avant toute consommation du quota d'envoi.
+  const identity = await c.env.DB.prepare("SELECT address FROM identities WHERE address = ?")
+    .bind(parsed.data.from).first();
+  if (!identity) {
+    return c.json({ error: { code: "unknown_sender", message: "Expéditeur inconnu" } }, 400);
+  }
+
+  // Reconstitue la chaîne References à partir du message parent, quand il est connu localement.
+  let references: string[] | undefined;
+  if (parsed.data.inReplyTo) {
+    const parent = await c.env.DB.prepare("SELECT message_id FROM messages WHERE message_id = ?")
+      .bind(parsed.data.inReplyTo).first<{ message_id: string }>();
+    if (parent) references = [parent.message_id];
+  }
+
+  const req: SendRequest = { ...parsed.data, references };
+  // Vérifié aussi côté client (sendEmail) : le refus explicite ici avec le code 413 donne un
+  // statut HTTP clair à l'appelant, avant même de tenter l'appel réseau.
+  if (payloadSize(req) > MAX_PAYLOAD_BYTES) {
+    return c.json({ error: { code: "too_large", message: "Le message dépasse 5 MiB" } }, 413);
+  }
+
+  let result;
+  try {
+    result = await sendEmail(c.env, req);
+  } catch (err) {
+    const status = err instanceof SendError ? err.status : 502;
+    return c.json(
+      { error: { code: "send_failed", message: err instanceof Error ? err.message : "Échec de l'envoi" } },
+      status as 400 | 413 | 429 | 502
+    );
+  }
+
+  // Le message n'est stocké en "sent" qu'ici, après confirmation de l'envoi : un envoi en
+  // échec (branche catch ci-dessus, ou le refus 413/400 plus haut) ne laisse aucune trace en
+  // base.
+  const messageId = `<${crypto.randomUUID()}@planigramme.fr>`;
+  const id = await storeOutgoing(c.env, req, messageId);
+  return c.json({ id, ...result });
+});
 
 api.patch("/messages/:id", async (c) => {
   const id = Number(c.req.param("id"));
