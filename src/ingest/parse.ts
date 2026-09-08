@@ -33,7 +33,7 @@ export function normalizeSubject(subject: string): string {
 }
 
 export function safeKey(messageId: string): string {
-  const stripped = messageId.replace(/^<|>$/g, "").replace(/\//g, "");
+  const stripped = messageId.replace(/^<|>$/g, "");
   const cleaned = stripped.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return (cleaned || "unknown").slice(0, 200);
 }
