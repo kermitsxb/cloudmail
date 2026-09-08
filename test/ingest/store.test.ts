@@ -1,6 +1,6 @@
 import { env, applyD1Migrations } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { storeIncoming } from "../../src/ingest/store";
+import { MAX_BODY_BYTES, storeIncoming } from "../../src/ingest/store";
 
 interface TestEnv {
   TEST_FIXTURES: Record<string, string>;
@@ -133,5 +133,59 @@ describe("storeIncoming", () => {
     const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
     const obj = await env.MAIL.get(`raw/${hex}.eml`);
     expect(obj).not.toBeNull();
+  });
+});
+
+describe("storeIncoming — garde de taille avant insertion D1", () => {
+  // Régression : les corps étaient insérés tels quels alors qu'une ligne D1 est plafonnée à
+  // 2 Mo. Un HTML volumineux (infolettre bourrée d'images data:) faisait lever l'INSERT ;
+  // handleEmail avale l'erreur, et le message ne survivait que comme objet R2 sans ligne D1.
+  const rawWithBody = (html: string, messageId: string): ArrayBuffer =>
+    new TextEncoder().encode(
+      `Message-ID: ${messageId}\r\nFrom: zoe@example.com\r\nTo: thomas@planigramme.fr\r\n` +
+        `Subject: gros message\r\nContent-Type: text/html; charset=utf-8\r\n\r\n${html}`,
+    ).buffer as ArrayBuffer;
+
+  it("tronque un corps HTML surdimensionné et marque la ligne", async () => {
+    const huge = `<p>${"a".repeat(MAX_BODY_BYTES + 100_000)}</p>`;
+    const res = await storeIncoming(env, rawWithBody(huge, "<huge@x>"), envelope);
+
+    expect(res.messageId).not.toBeNull();
+    const m = await env.DB.prepare(
+      "SELECT LENGTH(html_body) AS n, body_truncated FROM messages WHERE id = ?"
+    ).bind(res.messageId).first<{ n: number; body_truncated: number }>();
+    expect(m?.body_truncated).toBe(1);
+    expect(m?.n).toBeLessThanOrEqual(MAX_BODY_BYTES);
+    // Le brut complet reste dans R2, non tronqué.
+    const obj = await env.MAIL.get(res.rawKey);
+    expect((await obj!.arrayBuffer()).byteLength).toBeGreaterThan(MAX_BODY_BYTES);
+  });
+
+  it("ne marque pas comme tronqué un corps de taille normale", async () => {
+    const res = await storeIncoming(env, rawWithBody("<p>court</p>", "<small@x>"), envelope);
+    const m = await env.DB.prepare("SELECT body_truncated FROM messages WHERE id = ?")
+      .bind(res.messageId).first<{ body_truncated: number }>();
+    expect(m?.body_truncated).toBe(0);
+  });
+});
+
+describe("storeIncoming — redélivraison concurrente", () => {
+  // Régression : SELECT puis INSERT sec. Deux livraisons parallèles du même Message-ID
+  // passaient toutes deux le SELECT ; la seconde levait sur la contrainte d'unicité APRÈS
+  // que resolveThread lui avait créé un thread — échec signalé à tort, et thread orphelin.
+  it("n'échoue pas et ne laisse pas de thread orphelin", async () => {
+    const raw = await load("simple.eml");
+    const results = await Promise.all([
+      storeIncoming(env, raw, envelope),
+      storeIncoming(env, raw.slice(0), envelope),
+    ]);
+
+    for (const r of results) expect(r.messageId).not.toBeNull();
+    expect(results.filter((r) => r.duplicate)).toHaveLength(1);
+
+    const messages = await env.DB.prepare("SELECT COUNT(*) AS n FROM messages").first<{ n: number }>();
+    expect(messages?.n).toBe(1);
+    const threads = await env.DB.prepare("SELECT COUNT(*) AS n FROM threads").first<{ n: number }>();
+    expect(threads?.n).toBe(1);
   });
 });

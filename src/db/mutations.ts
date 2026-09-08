@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import { resolveThread } from "../ingest/threading";
-import { normalizeSubject, snippetOf } from "../ingest/parse";
+import { safeKey, snippetOf } from "../ingest/parse";
+import { sanitizeFilename } from "../ingest/store";
 import type { SendRequest } from "../send/client";
 
 export async function setRead(db: D1Database, messageId: number, isRead: boolean): Promise<boolean> {
@@ -143,6 +144,13 @@ export async function purgeMessage(env: Env, messageId: number): Promise<boolean
 // envoyé (il n'y a pas de MIME brut, seulement les champs structurés qu'on vient d'insérer).
 // C'est assumé : GET /messages/:id/raw répondra 404 pour ces messages, comme pour tout message
 // dont l'objet R2 aurait disparu.
+const base64ToBytes = (b64: string): Uint8Array => {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+};
+
 export async function storeOutgoing(env: Env, req: SendRequest, messageId: string): Promise<number> {
   const now = Math.floor(Date.now() / 1000);
   const parsedLike = {
@@ -184,17 +192,31 @@ export async function storeOutgoing(env: Env, req: SendRequest, messageId: strin
       );
     }
   }
+  // Les pièces jointes du message envoyé sont réellement persistées : octets dans R2 sous
+  // att/sent-<messageId sûr>/<i>-<nom assaini> (même schéma de clé et même assainissement de
+  // nom que l'ingestion, cf. sanitizeFilename dans ingest/store.ts), et une ligne par pièce
+  // dans `attachments`. Sans cela, has_attachments = 1 faisait afficher un trombone dans la
+  // liste pour une conversation qui n'en montrait aucune une fois ouverte, et l'utilisateur
+  // n'avait aucune copie de ce qu'il avait envoyé. `content_id` reste NULL : un message
+  // composé ici n'a pas d'image inline référencée par cid:.
+  const key = safeKey(messageId);
+  for (const [i, att] of (req.attachments ?? []).entries()) {
+    const bytes = base64ToBytes(att.contentBase64);
+    const r2Key = `att/sent-${key}/${i}-${sanitizeFilename(att.filename)}`;
+    await env.MAIL.put(r2Key, bytes, { httpMetadata: { contentType: att.mimeType } });
+    statements.push(
+      env.DB.prepare(
+        "INSERT INTO attachments (message_id, filename, mime_type, size, content_id, r2_key) VALUES (?, ?, ?, ?, NULL, ?)"
+      ).bind(id, att.filename, att.mimeType, bytes.byteLength, r2Key)
+    );
+  }
+
   statements.push(
     env.DB.prepare(
       "UPDATE threads SET message_count = message_count + 1, last_message_at = MAX(last_message_at, ?) WHERE id = ?"
     ).bind(now, threadId)
   );
   await env.DB.batch(statements);
-
-  // normalizeSubject sert à garder le sujet du thread cohérent après un Re : un thread créé (ou
-  // rattaché) sans sujet normalisé préexistant récupère celui de ce message.
-  await env.DB.prepare("UPDATE threads SET subject_norm = ? WHERE id = ? AND subject_norm = ''")
-    .bind(normalizeSubject(req.subject), threadId).run();
 
   return id;
 }
