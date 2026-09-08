@@ -624,7 +624,7 @@ describe("normalizeSubject", () => {
 
 describe("safeKey", () => {
   it("réduit le Message-ID aux caractères sûrs", () => {
-    expect(safeKey("<a/b c@ex.com>")).toBe("ab-c-ex.com");
+    expect(safeKey("<a/b c@ex.com>")).toBe("a-b-c-ex.com");
   });
 
   it("tronque à 200 caractères", () => {
