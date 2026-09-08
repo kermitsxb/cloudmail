@@ -220,4 +220,106 @@ describe("sanitizeHtml", () => {
     expect(html).not.toContain("<meta");
     expect(html).toContain("<p>ok</p>");
   });
+
+  // --- Fix round 1 : famille des éléments à contenu RAWTEXT / escapable RAWTEXT ---
+  //
+  // Pour ces balises, le "texte" restitué par le parseur entre l'ouverture et la fermeture
+  // n'est pas réanalysé comme balisage par le parseur *source* — mais removeAndKeepContent()
+  // le réémet tel quel dans le HTML de sortie, où il redevient du balisage vivant dès qu'un
+  // navigateur (ou l'iframe sandbox du front) le reparse. Chaque test ci-dessous vérifie qu'il
+  // ne subsiste rien d'exécutable une fois passé par sanitizeHtml, en repassant la sortie dans
+  // un second HTMLRewriter pour détecter tout élément <script> ou <img onerror> réel.
+
+  const assertNoLiveScriptOrHandler = async (html: string) => {
+    let sawScript = false;
+    let sawOnerror = false;
+    await new HTMLRewriter()
+      .on("script", { element() { sawScript = true; } })
+      .on("*", {
+        element(el) {
+          if (el.getAttribute("onerror") !== null) sawOnerror = true;
+        },
+      })
+      .transform(new Response(html))
+      .text();
+    expect(sawScript).toBe(false);
+    expect(sawOnerror).toBe(false);
+  };
+
+  it("neutralise <title><script>...</script></title>", async () => {
+    const { html } = await clean(`<title><script>alert(1)</script></title><p>ok</p>`);
+    expect(html).not.toContain("alert");
+    expect(html).toContain("<p>ok</p>");
+    await assertNoLiveScriptOrHandler(html);
+  });
+
+  it("neutralise <textarea><img onerror=...></textarea>", async () => {
+    const { html } = await clean(`<textarea><img src=x onerror=alert(1)></textarea><p>ok</p>`);
+    expect(html).not.toContain("alert");
+    expect(html).toContain("<p>ok</p>");
+    await assertNoLiveScriptOrHandler(html);
+  });
+
+  it("neutralise <noscript><img onerror=...></noscript>", async () => {
+    const { html } = await clean(`<noscript><img src=x onerror=alert(1)></noscript><p>ok</p>`);
+    expect(html).not.toContain("alert");
+    expect(html).toContain("<p>ok</p>");
+    await assertNoLiveScriptOrHandler(html);
+  });
+
+  it("neutralise <xmp><script>...</script></xmp>", async () => {
+    const { html } = await clean(`<xmp><script>alert(1)</script></xmp><p>ok</p>`);
+    expect(html).not.toContain("alert");
+    expect(html).toContain("<p>ok</p>");
+    await assertNoLiveScriptOrHandler(html);
+  });
+
+  it("neutralise <noembed><img onerror=...></noembed>", async () => {
+    const { html } = await clean(`<noembed><img src=x onerror=alert(1)></noembed><p>ok</p>`);
+    expect(html).not.toContain("alert");
+    await assertNoLiveScriptOrHandler(html);
+  });
+
+  it("neutralise <noframes><script>...</script></noframes>", async () => {
+    const { html } = await clean(`<noframes><script>alert(1)</script></noframes><p>ok</p>`);
+    expect(html).not.toContain("alert");
+    await assertNoLiveScriptOrHandler(html);
+  });
+
+  it("neutralise <listing><script>...</script></listing>", async () => {
+    const { html } = await clean(`<listing><script>alert(1)</script></listing><p>ok</p>`);
+    expect(html).not.toContain("alert");
+    await assertNoLiveScriptOrHandler(html);
+  });
+
+  it("neutralise <plaintext> et tout ce qui le suit", async () => {
+    const { html } = await clean(`<plaintext><script>alert(1)</script>`);
+    expect(html).not.toContain("alert");
+  });
+
+  it("neutralise <template><script>...</script></template>", async () => {
+    const { html } = await clean(`<template><script>alert(1)</script></template><p>ok</p>`);
+    expect(html).not.toContain("alert");
+    await assertNoLiveScriptOrHandler(html);
+  });
+
+  it("verrouille le comportement par défaut : une balise inconnue à modèle de contenu normal garde son texte", async () => {
+    // <center>, <font> et <o:p> (namespace Outlook) ont un modèle de contenu normal : leurs
+    // enfants sont analysés comme du balisage à part entière par le parseur source, donc un
+    // <script> à l'intérieur est déjà intercepté indépendamment par la règle générale — la
+    // balise elle-même peut donc être simplement dépouillée (removeAndKeepContent) sans risque,
+    // et son texte légitime doit être conservé (essentiel pour les emails Outlook réels).
+    const center = await clean(`<center>texte centré<script>alert(1)</script></center>`);
+    expect(center.html).not.toContain("<center");
+    expect(center.html).toContain("texte centré");
+    expect(center.html).not.toContain("alert");
+
+    const font = await clean(`<font color="red">texte coloré</font>`);
+    expect(font.html).not.toContain("<font");
+    expect(font.html).toContain("texte coloré");
+
+    const outlook = await clean(`<o:p>texte outlook</o:p>`);
+    expect(outlook.html).not.toContain("<o:p");
+    expect(outlook.html).toContain("texte outlook");
+  });
 });
