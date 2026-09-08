@@ -1,4 +1,7 @@
 import type { Env } from "../env";
+import { resolveThread } from "../ingest/threading";
+import { normalizeSubject, snippetOf } from "../ingest/parse";
+import type { SendRequest } from "../send/client";
 
 export async function setRead(db: D1Database, messageId: number, isRead: boolean): Promise<boolean> {
   const row = await db
@@ -123,4 +126,75 @@ export async function purgeMessage(env: Env, messageId: number): Promise<boolean
   // corps d'e-mail rigoureusement identique). On ne construit pas de comptage de références
   // pour ce cas résiduel.
   return true;
+}
+
+// Stocke une copie d'un message sortant déjà envoyé avec succès (voir POST /messages dans
+// api/routes.ts, qui n'appelle cette fonction qu'après confirmation de sendEmail). On
+// réutilise resolveThread — écrit pour les messages entrants — en construisant un objet de
+// forme ParsedMessage : resolveThread ne lit que inReplyTo, references, subject et date, donc
+// cette réutilisation est sûre même si les autres champs (attachments, parseError, replyTo)
+// sont des valeurs neutres qui ne servent qu'à satisfaire le type. `date` est l'instant présent
+// (l'API Email Sending n'indique pas d'horodatage serveur dans sa réponse), `references` celles
+// fournies par la route (reconstituées à partir du message parent), et `subject` le sujet tel
+// que saisi par l'utilisateur — resolveThread le normalise lui-même via normalizeSubject avant
+// de l'utiliser pour l'appariement.
+//
+// `raw_key` vaut `sent/<messageId>` : aucun objet R2 n'existe à cette clé pour un message
+// envoyé (il n'y a pas de MIME brut, seulement les champs structurés qu'on vient d'insérer).
+// C'est assumé : GET /messages/:id/raw répondra 404 pour ces messages, comme pour tout message
+// dont l'objet R2 aurait disparu.
+export async function storeOutgoing(env: Env, req: SendRequest, messageId: string): Promise<number> {
+  const now = Math.floor(Date.now() / 1000);
+  const parsedLike = {
+    messageId,
+    inReplyTo: req.inReplyTo ?? null,
+    references: req.references ?? [],
+    from: { address: req.from, name: null },
+    to: req.to.map((a) => ({ address: a, name: null })),
+    cc: (req.cc ?? []).map((a) => ({ address: a, name: null })),
+    replyTo: [],
+    subject: req.subject,
+    text: req.text,
+    html: req.html ?? null,
+    date: now,
+    attachments: [],
+    parseError: false,
+  };
+
+  const participants = [req.from, ...req.to, ...(req.cc ?? [])];
+  const { threadId } = await resolveThread(env.DB, parsedLike, participants);
+
+  const inserted = await env.DB.prepare(
+    `INSERT INTO messages
+       (thread_id, message_id, in_reply_to, direction, folder, from_addr, subject, text_body, html_body,
+        snippet, received_at, is_read, has_attachments, raw_key, parse_error)
+     VALUES (?, ?, ?, 'out', 'sent', ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)`
+  ).bind(
+    threadId, messageId, req.inReplyTo ?? null, req.from, req.subject, req.text, req.html ?? null,
+    snippetOf(req.text), now, (req.attachments?.length ?? 0) > 0 ? 1 : 0, `sent/${messageId}`
+  ).run();
+  const id = Number(inserted.meta.last_row_id);
+
+  const statements: D1PreparedStatement[] = [];
+  for (const [kind, list] of [["to", req.to], ["cc", req.cc ?? []]] as const) {
+    for (const address of list) {
+      statements.push(
+        env.DB.prepare("INSERT INTO recipients (message_id, kind, address, name) VALUES (?, ?, ?, NULL)")
+          .bind(id, kind, address)
+      );
+    }
+  }
+  statements.push(
+    env.DB.prepare(
+      "UPDATE threads SET message_count = message_count + 1, last_message_at = MAX(last_message_at, ?) WHERE id = ?"
+    ).bind(now, threadId)
+  );
+  await env.DB.batch(statements);
+
+  // normalizeSubject sert à garder le sujet du thread cohérent après un Re : un thread créé (ou
+  // rattaché) sans sujet normalisé préexistant récupère celui de ce message.
+  await env.DB.prepare("UPDATE threads SET subject_norm = ? WHERE id = ? AND subject_norm = ''")
+    .bind(normalizeSubject(req.subject), threadId).run();
+
+  return id;
 }
