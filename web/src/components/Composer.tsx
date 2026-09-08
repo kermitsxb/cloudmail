@@ -4,15 +4,35 @@ import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { useIdentities, useSendMessage, type MessageDetail } from "../api/client";
 
-// Même mesure que `payloadSize` côté Worker (src/send/client.ts) pour la partie pièces
-// jointes : la longueur de la chaîne base64 telle quelle, pas les octets décodés. Un fichier
-// accepté ici doit rester accepté par le Worker.
-const MAX_ATTACHMENTS_BASE64 = 5 * 1024 * 1024;
+// Calque exact de `payloadSize` côté Worker (src/send/client.ts) : mesure la taille du
+// message tel qu'il sera transmis (chaînes base64 telles quelles, pas les octets décodés)
+// pour qu'un message accepté ici reste accepté par le Worker, et qu'un message refusé par
+// le Worker le soit déjà ici — y compris quand aucune pièce jointe n'est en cause (corps ou
+// objet volumineux à eux seuls).
+const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024;
 
 type Attachment = { filename: string; mimeType: string; contentBase64: string };
 
+function payloadSize(req: {
+  subject: string;
+  text: string;
+  html?: string;
+  to: string[];
+  cc?: string[];
+  attachments?: Attachment[];
+}): number {
+  const body = new TextEncoder().encode(
+    req.subject + req.text + (req.html ?? "") + req.to.join(",") + (req.cc ?? []).join(","),
+  ).byteLength;
+  const attachments = (req.attachments ?? []).reduce(
+    (sum, a) => sum + a.contentBase64.length + a.filename.length,
+    0,
+  );
+  return body + attachments;
+}
+
 function replySubject(subject: string): string {
-  return /^re:\s*/i.test(subject) ? subject : `Re: ${subject}`;
+  return /^\s*re:\s*/i.test(subject) ? subject : `Re: ${subject}`;
 }
 
 function parseRecipients(value: string): string[] {
@@ -74,13 +94,19 @@ export function Composer({
       })),
     );
 
-    const total = [...attachments, ...newAttachments].reduce((sum, a) => sum + a.contentBase64.length, 0);
-    if (total > MAX_ATTACHMENTS_BASE64) {
+    const merged = [...attachments, ...newAttachments];
+    const size = payloadSize({
+      subject,
+      text,
+      to: parseRecipients(to),
+      attachments: merged,
+    });
+    if (size > MAX_PAYLOAD_BYTES) {
       setFileError("L'ensemble dépasse la limite de 5 MiB");
       return;
     }
     setFileError(null);
-    setAttachments((prev) => [...prev, ...newAttachments]);
+    setAttachments(merged);
   };
 
   const removeAttachment = (index: number) => {
@@ -94,6 +120,12 @@ export function Composer({
     const recipients = parseRecipients(to);
     if (recipients.length === 0) {
       setError("Indique au moins un destinataire");
+      return;
+    }
+
+    const size = payloadSize({ subject, text, to: recipients, attachments });
+    if (size > MAX_PAYLOAD_BYTES) {
+      setError("Le message dépasse la limite de 5 MiB");
       return;
     }
 

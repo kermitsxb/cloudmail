@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer";
@@ -12,7 +12,7 @@ const wrap = (ui: React.ReactElement) => {
 const identities = [{ address: "thomas@planigramme.fr", displayName: "Thomas", isDefault: true }];
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string, _init?: RequestInit) => {
     if (url.includes("/identities")) return Response.json(identities);
     return Response.json({ id: 1, delivered: ["zoe@example.com"], queued: [], permanentBounces: [] });
   }));
@@ -66,9 +66,38 @@ describe("Composer", () => {
     expect(await screen.findByText(/5 MiB/)).toBeDefined();
   });
 
+  it("refuse l'envoi si le corps seul dépasse la limite, sans pièce jointe", async () => {
+    wrap(<Composer mode="new" onClose={() => {}} />);
+    await userEvent.type(await screen.findByLabelText("Destinataires"), "zoe@example.com");
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "a".repeat(6 * 1024 * 1024) } });
+    await userEvent.click(screen.getByRole("button", { name: "Envoyer" }));
+
+    expect(await screen.findByText(/5 MiB/)).toBeDefined();
+    const sendCalls = vi.mocked(fetch).mock.calls.filter(([url]) => !String(url).includes("/identities"));
+    expect(sendCalls.length).toBe(0);
+  });
+
+  it("refuse l'envoi quand les pièces jointes seules passent mais l'ensemble dépasse", async () => {
+    wrap(<Composer mode="new" onClose={() => {}} />);
+    const input = await screen.findByLabelText("Pièces jointes") as HTMLInputElement;
+    const fichier = new File([new Uint8Array(3.5 * 1024 * 1024)], "moyen.bin");
+    await userEvent.upload(input, fichier);
+    expect(screen.queryByText(/5 MiB/)).toBeNull();
+
+    await userEvent.type(screen.getByLabelText("Destinataires"), "zoe@example.com");
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "a".repeat(2 * 1024 * 1024) } });
+    await userEvent.click(screen.getByRole("button", { name: "Envoyer" }));
+
+    expect(await screen.findByText(/5 MiB/)).toBeDefined();
+    const sendCalls = vi.mocked(fetch).mock.calls.filter(([url]) => !String(url).includes("/identities"));
+    expect(sendCalls.length).toBe(0);
+  });
+
   it("affiche l'erreur renvoyée par l'API", async () => {
-    vi.mocked(fetch).mockImplementation(async (url: string) =>
-      url.includes("/identities")
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).includes("/identities")
         ? Response.json(identities)
         : Response.json({ error: { code: "send_failed", message: "Domaine non vérifié" } }, { status: 400 })
     );
