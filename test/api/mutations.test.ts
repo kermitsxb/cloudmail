@@ -130,6 +130,12 @@ describe("purgeMessage", () => {
     expect(await env.DB.prepare("SELECT id FROM attachments WHERE message_id = 1").first()).toBeNull();
     expect(await env.MAIL.get("raw/m1.eml")).toBeNull();
     expect(await env.MAIL.get("att/m1/0-f.pdf")).toBeNull();
+
+    // Le message 1 était dans inbox et non lu : le thread (2 messages, 2 non lus au départ)
+    // doit refléter qu'il n'en reste plus qu'un, encore non lu.
+    const t = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = 1")
+      .first<{ message_count: number; unread_count: number }>();
+    expect(t).toMatchObject({ message_count: 1, unread_count: 1 });
   });
 
   it("supprime le thread devenu vide", async () => {
@@ -142,23 +148,39 @@ describe("purgeMessage", () => {
     expect(await purgeMessage(env as unknown as Env, 999)).toBe(false);
   });
 
-  it("supprime la ligne D1 avant les objets R2, pour ne jamais laisser la base référencer un objet absent", async () => {
+  it("ne touche pas les compteurs quand le message purgé était déjà à la corbeille", async () => {
+    // moveToFolder a déjà décrémenté message_count/unread_count au passage en corbeille ;
+    // purgeMessage ne doit pas les décrémenter une seconde fois.
+    await moveToFolder(env.DB, 1, "trash");
+    let t = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = 1")
+      .first<{ message_count: number; unread_count: number }>();
+    expect(t).toMatchObject({ message_count: 1, unread_count: 1 });
+
+    expect(await purgeMessage(env as unknown as Env, 1)).toBe(true);
+    t = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = 1")
+      .first<{ message_count: number; unread_count: number }>();
+    expect(t).toMatchObject({ message_count: 1, unread_count: 1 });
+  });
+
+  it("supprime les objets R2 avant la ligne D1 : si R2 échoue, la ligne D1 reste intacte", async () => {
     await env.MAIL.put("raw/m1.eml", "brut");
-    let dbRowGoneWhenR2DeleteCalled: boolean | undefined;
     const wrappedEnv = {
       ...env,
       MAIL: {
         ...env.MAIL,
-        delete: async (keys: string | string[]) => {
-          const row = await env.DB.prepare("SELECT id FROM messages WHERE id = 1").first();
-          dbRowGoneWhenR2DeleteCalled = row === null;
-          return env.MAIL.delete(keys);
+        delete: async () => {
+          throw new Error("R2 indisponible");
         },
       },
     } as unknown as Env;
 
-    await purgeMessage(wrappedEnv, 1);
-    expect(dbRowGoneWhenR2DeleteCalled).toBe(true);
+    await expect(purgeMessage(wrappedEnv, 1)).rejects.toThrow("R2 indisponible");
+
+    const m = await env.DB.prepare("SELECT id FROM messages WHERE id = 1").first();
+    expect(m).not.toBeNull();
+    const t = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = 1")
+      .first<{ message_count: number; unread_count: number }>();
+    expect(t).toMatchObject({ message_count: 2, unread_count: 2 });
   });
 });
 
