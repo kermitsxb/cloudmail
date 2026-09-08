@@ -1,6 +1,4 @@
 -- migrations/0001_initial.sql
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE identities (
   id INTEGER PRIMARY KEY,
   address TEXT NOT NULL UNIQUE,
