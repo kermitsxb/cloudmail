@@ -1,1 +1,5 @@
 .nwave/
+node_modules
+dist
+.wrangler
+.dev.vars

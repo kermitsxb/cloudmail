@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudmail",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "./web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cloudmail",
+      // Placeholder : la vraie ressource D1 distante sera créée avec l'utilisateur dans une
+      // tâche ultérieure (`wrangler d1 create cloudmail`). En attendant, "local" suffit :
+      // Miniflare fournit D1 et R2 en local pour `wrangler dev` et les tests Vitest, sans
+      // authentification Cloudflare.
+      "database_id": "local",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "MAIL", "bucket_name": "cloudmail" }
+  ],
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    "ALLOWED_EMAILS": "thomas.stocker.pro@gmail.com"
+  }
+}
