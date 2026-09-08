@@ -17,8 +17,23 @@ const ALLOWED_TAGS = new Set([
 // contenu peut receler des vecteurs XSS impossibles à assainir attribut par attribut une fois
 // dépouillé de leur balise racine (svg avec <animate onbegin>, math avec <mtext><script>,
 // iframe/object/embed avec leurs propres documents, form avec formaction).
+//
+// Inclut aussi TOUTE la famille des éléments à modèle de contenu RAWTEXT / escapable RAWTEXT
+// (au sens de la spec HTML5 https://html.spec.whatwg.org/multipage/parsing.html#parsing-html-fragments
+// et #the-textarea-element / #the-title-element / #ratexttext-cdata / obsolete elements) :
+// title, textarea, xmp, noembed, noframes, noscript, plaintext, listing — plus template, dont
+// le contenu est un DocumentFragment traité à part par le parseur. Pour ces éléments, ce que le
+// parseur restitue comme « texte » entre les balises est le texte source NON réanalysé comme
+// balisage à l'intérieur — mais `removeAndKeepContent()` le réémet tel quel dans le flux de
+// sortie, où il est réanalysé comme balisage vivant dès l'insertion dans un DOM (ex.
+// `<title><script>alert(1)</script></title>` -> le "contenu" restitué est littéralement
+// `<script>alert(1)</script>`, qui redevient une vraie balise <script> une fois réinjecté).
+// Le repli générique `removeAndKeepContent()` n'est donc sûr que pour les balises à modèle de
+// contenu normal (ex. <center>, <font>, <o:p> d'Outlook) ; toute la famille RAWTEXT doit être
+// supprimée avec son contenu, comme <script>/<style>.
 const DROP_WITH_CONTENT = new Set([
   "script", "style", "iframe", "object", "embed", "form", "svg", "math", "link", "meta", "base",
+  "title", "textarea", "xmp", "noembed", "noframes", "noscript", "plaintext", "listing", "template",
 ]);
 
 const ALLOWED_ATTRS = new Set(["href", "src", "alt", "title", "width", "height", "colspan", "rowspan"]);
