@@ -27,5 +27,11 @@ export default defineConfig(async () => {
         },
       }),
     ],
+    test: {
+      // Le front (web/) a son propre vitest en environnement jsdom — on l'exclut ici
+      // pour que cette config, contrainte au runtime Workers, ne tente jamais de
+      // charger ses tests React (et inversement, voir web/vitest.config.ts).
+      exclude: ["**/node_modules/**", "**/dist/**", "web/**"],
+    },
   };
 });
