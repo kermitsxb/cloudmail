@@ -102,3 +102,111 @@ api.delete("/messages/:id", async (c) => {
   if (!ok) return c.json({ error: { code: "not_found", message: "Message introuvable" } }, 404);
   return c.json({ ok: true });
 });
+
+// Types autorisés à être servis avec leur Content-Type d'origine. Tout le reste (le
+// mime_type provient de l'en-tête Content-Type de l'email, donc contrôlé par l'expéditeur)
+// retombe sur application/octet-stream, en particulier text/html qui déclencherait un rendu
+// actif si le navigateur naviguait vers cette URL.
+const SAFE_INLINE_TYPES = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "text/plain",
+]);
+
+// Extrait le type de base (avant le premier ';', normalisé en minuscules) et le compare
+// STRICTEMENT (égalité exacte, jamais includes()/regex sur la chaîne brute) à la liste
+// blanche. Un attaquant qui ajoute des paramètres ("text/html; x=image/png"), joue sur la
+// casse, ou insère des caractères de contrôle ne peut donc jamais se faire passer pour un
+// type sûr : la valeur émise dans l'en-tête est toujours la constante canonique de la liste
+// blanche, jamais la chaîne fournie par l'expéditeur.
+function safeContentType(raw: string): string {
+  const base = raw.split(";")[0]?.trim().toLowerCase() ?? "";
+  return SAFE_INLINE_TYPES.has(base) ? base : "application/octet-stream";
+}
+
+// Construit un nom de fichier ASCII sûr pour le paramètre filename= d'un Content-Disposition
+// (RFC 6266 exige une quoted-string ASCII). On remplace tout caractère de contrôle (y compris
+// CR/LF, qui permettrait une injection d'en-tête HTTP), tout caractère non-ASCII, ainsi que
+// les guillemets et antislashs (qui romphraient le parsing de la quoted-string), par "_".
+// Le nom d'origine, lui, reste disponible en toute fidélité via le paramètre filename*
+// (RFC 5987) où il est pourcent-encodé.
+function safeAsciiFilename(name: string): string {
+  const sanitized = Array.from(name)
+    .map((ch) => {
+      const code = ch.codePointAt(0) ?? 0;
+      if (code < 0x20 || code === 0x7f || code > 0x7e) return "_";
+      if (ch === '"' || ch === "\\") return "_";
+      return ch;
+    })
+    .join("");
+  return sanitized || "fichier";
+}
+
+function contentDispositionFor(filename: string): string {
+  const name = filename || "fichier";
+  const asciiName = safeAsciiFilename(name);
+  const utf8Name = encodeURIComponent(name);
+  return `attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`;
+}
+
+// Sert le contenu d'une pièce jointe depuis R2. Content-Disposition est TOUJOURS "attachment"
+// (jamais "inline"), y compris pour les images. Ce n'est pas un problème pour l'affichage des
+// images cid: réécrites par sanitizeHtml vers cette route : Content-Disposition ne s'applique
+// qu'à une navigation de premier niveau (l'utilisateur ouvre l'URL directement, ou clique un
+// lien <a>) ; une sous-ressource chargée via <img src="..."> à l'intérieur de l'iframe
+// sandboxée du message est récupérée comme une image, pas comme un document, et le navigateur
+// ignore Content-Disposition dans ce contexte pour la décoder et l'afficher normalement.
+// "attachment" en revanche empêche bien un rendu HTML si quelqu'un ouvre l'URL de la pièce
+// jointe dans un nouvel onglet ; combiné à X-Content-Type-Options: nosniff et au Content-Type
+// forcé à application/octet-stream pour tout type non whitelisté, ceci empêche un fichier
+// hostile nommé "facture.html" d'être exécuté comme page.
+api.get("/attachments/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) {
+    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+  }
+
+  const att = await c.env.DB.prepare(
+    "SELECT filename, mime_type, r2_key FROM attachments WHERE id = ?"
+  ).bind(id).first<{ filename: string; mime_type: string; r2_key: string }>();
+  if (!att) return c.json({ error: { code: "not_found", message: "Pièce jointe introuvable" } }, 404);
+
+  const obj = await c.env.MAIL.get(att.r2_key);
+  if (!obj) return c.json({ error: { code: "not_found", message: "Contenu introuvable" } }, 404);
+
+  return new Response(obj.body, {
+    headers: {
+      "content-type": safeContentType(att.mime_type),
+      "content-disposition": contentDispositionFor(att.filename),
+      "x-content-type-options": "nosniff",
+    },
+  });
+});
+
+// Sert le .eml brut d'origine depuis R2, non assaini par nature (c'est le point d'entrée de
+// tout le pipeline de sanitization). Content-Disposition: attachment garantit qu'il n'est
+// jamais rendu par le navigateur, seulement téléchargé.
+api.get("/messages/:id/raw", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) {
+    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+  }
+
+  const msg = await c.env.DB.prepare("SELECT raw_key FROM messages WHERE id = ?")
+    .bind(id).first<{ raw_key: string }>();
+  if (!msg) return c.json({ error: { code: "not_found", message: "Message introuvable" } }, 404);
+
+  const obj = await c.env.MAIL.get(msg.raw_key);
+  if (!obj) return c.json({ error: { code: "not_found", message: "MIME brut introuvable" } }, 404);
+
+  return new Response(obj.body, {
+    headers: {
+      "content-type": "message/rfc822",
+      "content-disposition": `attachment; filename="message-${id}.eml"`,
+      "x-content-type-options": "nosniff",
+    },
+  });
+});
