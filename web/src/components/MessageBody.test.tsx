@@ -37,3 +37,25 @@ describe("MessageBody", () => {
     expect(await screen.findByText("juste du texte")).toBeDefined();
   });
 });
+
+describe("MessageBody — erreurs HTTP", () => {
+  // Régression : le fetch nu ne vérifiait pas res.ok. Un 500 faisait échouer r.json() sans
+  // rattrapage (panneau bloqué sur « Chargement… » indéfiniment), et un 401 — ce qui arrive
+  // dès qu'une session Access expire — affichait un corps vide sans le moindre signal.
+  it("affiche l'erreur au lieu de rester sur « Chargement… » en cas de 500", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      Response.json({ error: { code: "internal_error", message: "Erreur interne" } }, { status: 500 })
+    ));
+    render(<MessageBody messageId={1} />);
+    expect(await screen.findByText(/Erreur interne/)).toBeDefined();
+    expect(screen.queryByText("Chargement…")).toBeNull();
+  });
+
+  it("signale une session expirée (401) au lieu d'un corps vide", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      Response.json({ error: { code: "unauthenticated", message: "Session expirée" } }, { status: 401 })
+    ));
+    render(<MessageBody messageId={1} />);
+    expect(await screen.findByText(/Session expirée/)).toBeDefined();
+  });
+});

@@ -41,3 +41,19 @@ describe("ThreadList", () => {
     expect(screen.getByText(/Aucun message/)).toBeDefined();
   });
 });
+
+describe("ThreadList — pagination", () => {
+  it("propose de charger la page suivante quand il en reste une", async () => {
+    const onLoadMore = vi.fn();
+    render(
+      <ThreadList threads={threads} selectedId={null} onSelect={() => {}} hasMore onLoadMore={onLoadMore} />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Charger plus/ }));
+    expect(onLoadMore).toHaveBeenCalled();
+  });
+
+  it("ne propose rien quand la dernière page est atteinte", () => {
+    render(<ThreadList threads={threads} selectedId={null} onSelect={() => {}} hasMore={false} />);
+    expect(screen.queryByRole("button", { name: /Charger plus/ })).toBeNull();
+  });
+});

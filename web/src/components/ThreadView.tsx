@@ -65,6 +65,15 @@ function MessageItem({
             </div>
           )}
 
+          {message.bodyTruncated && (
+            <div className="flex items-center justify-between gap-4 border-b bg-muted px-4 py-2 text-sm">
+              <span>Corps trop volumineux : seul le début a été conservé en base.</span>
+              <a className="underline" href={`/api/messages/${message.id}/raw`}>
+                Voir le message brut
+              </a>
+            </div>
+          )}
+
           <MessageBody messageId={message.id} />
 
           {message.attachments.length > 0 && (

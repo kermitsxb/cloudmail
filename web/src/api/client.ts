@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 // Ces types sont des miroirs volontaires de src/db/queries.ts (cible de build distincte
 // du Worker) : toute évolution des formes de réponse côté back doit être répercutée ici
@@ -28,6 +28,7 @@ export type MessageDetail = {
   receivedAt: number;
   isRead: boolean;
   parseError: boolean;
+  bodyTruncated: boolean;
   attachments: { id: number; filename: string; mimeType: string; size: number }[];
 };
 
@@ -43,7 +44,7 @@ export class ApiError extends Error {
   }
 }
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
@@ -55,13 +56,24 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export type ThreadsPage = { threads: ThreadSummary[]; cursor: string | null };
+
+// Pagination par curseur, câblée jusqu'au bout : le back-end renvoie 30 conversations par
+// page avec un `cursor` vers la suivante, mais tant que le front ne le renvoyait pas, seules
+// les 30 conversations les plus récentes (et les 30 premiers résultats d'une recherche)
+// étaient atteignables. `getNextPageParam` renvoie `cursor`, que le back-end met à null sur
+// la dernière page — ce qui arrête proprement la pagination côté React Query.
 export const useThreads = (folder: string, q: string) =>
-  useQuery({
+  useInfiniteQuery({
     queryKey: ["threads", folder, q],
-    queryFn: () =>
-      api<{ threads: ThreadSummary[]; cursor: string | null }>(
-        `/threads?folder=${folder}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      api<ThreadsPage>(
+        `/threads?folder=${folder}` +
+          (q ? `&q=${encodeURIComponent(q)}` : "") +
+          (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""),
       ),
+    getNextPageParam: (last) => last.cursor,
   });
 
 export const useThread = (id: number | null) =>
