@@ -1,0 +1,15 @@
+# Copier ce fichier vers .dev.vars (ignoré par git) pour le développement local.
+# `pnpm wrangler dev` et `pnpm dev` chargent .dev.vars automatiquement.
+
+# Désactive TOUTE l'authentification Cloudflare Access : la requête est traitée
+# comme si elle venait de "dev@localhost", sans vérification de jeton JWT.
+# ATTENTION : à ne JAMAIS définir ailleurs qu'en local. Ne jamais poser cette
+# variable en secret ou en var d'environnement sur le Worker déployé — ce
+# serait une application Cloudmail accessible sans authentification.
+DEV_BYPASS_AUTH=1
+
+# Identifiants pour l'API Cloudflare Email Sending (src/send/client.ts).
+# Requis uniquement si vous testez l'envoi d'email en local ; sinon laissez
+# des valeurs factices, l'envoi échouera simplement.
+CF_ACCOUNT_ID=
+CF_API_TOKEN=
