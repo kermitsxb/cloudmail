@@ -1025,7 +1025,8 @@ describe("storeIncoming", () => {
   it("écrit le MIME brut dans R2 et le message dans D1", async () => {
     const res = await storeIncoming(env, await load("simple.eml"), envelope);
     expect(res.duplicate).toBe(false);
-    expect(res.rawKey).toBe("raw/simple-1-example.com.eml");
+    // Clé adressée par contenu : dérivée des octets bruts, donc calculable avant tout parsing.
+    expect(res.rawKey).toMatch(/^raw\/[0-9a-f]{64}\.eml$/);
 
     const obj = await env.MAIL.get(res.rawKey);
     expect(obj).not.toBeNull();
@@ -1102,8 +1103,17 @@ describe("storeIncoming", () => {
   it("écrit le brut dans R2 même si l'insertion D1 échoue", async () => {
     const broken = { ...env, DB: { prepare: () => { throw new Error("d1 down"); } } } as unknown as typeof env;
     await expect(storeIncoming(broken, await load("simple.eml"), envelope)).rejects.toThrow();
-    const obj = await env.MAIL.get("raw/simple-1-example.com.eml");
-    expect(obj).not.toBeNull();
+    const objets = await env.MAIL.list({ prefix: "raw/" });
+    expect(objets.objects).toHaveLength(1);
+  });
+
+  it("écrit le brut dans R2 même si le parsing échoue", async () => {
+    // C'est ce test qui atteste le vrai invariant : la clé ne dépend pas du parsing.
+    await expect(
+      storeIncoming(env, await load("simple.eml"), { from: null as unknown as string, to: "x@y.z" })
+    ).rejects.toThrow();
+    const objets = await env.MAIL.list({ prefix: "raw/" });
+    expect(objets.objects).toHaveLength(1);
   });
 });
 ```
@@ -1122,6 +1132,11 @@ import { resolveThread } from "./threading";
 
 export type StoreResult = { messageId: number | null; duplicate: boolean; rawKey: string };
 
+async function sha256Hex(data: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 const sanitizeFilename = (name: string): string =>
   name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "fichier";
 
@@ -1130,18 +1145,12 @@ export async function storeIncoming(
   raw: ArrayBuffer,
   envelope: { from: string; to: string },
 ): Promise<StoreResult> {
-  // Le brut est écrit AVANT tout parsing : un message reste toujours rejouable.
-  let msg: ParsedMessage;
-  let rawKey: string;
-  try {
-    msg = await parseEmail(raw, envelope.from);
-    rawKey = `raw/${safeKey(msg.messageId)}.eml`;
-  } catch {
-    msg = await parseEmail(new ArrayBuffer(0), envelope.from);
-    rawKey = `raw/${safeKey(msg.messageId)}.eml`;
-  }
+  // Le brut est écrit AVANT tout parsing. La clé est donc dérivée des octets bruts
+  // eux-mêmes, jamais du message parsé : un email reste rejouable même si le parsing lève.
+  const rawKey = `raw/${await sha256Hex(raw)}.eml`;
   await env.MAIL.put(rawKey, raw);
 
+  const msg = await parseEmail(raw, envelope.from);
   const key = safeKey(msg.messageId);
   const participants = [
     msg.from.address,
