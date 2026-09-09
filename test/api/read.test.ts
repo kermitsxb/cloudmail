@@ -135,12 +135,12 @@ describe("getThread", () => {
   it("retourne les messages avec destinataires et pièces jointes", async () => {
     await insertThread(1, "facture", 100);
     await insertMessage(1, 1, { subject: "Facture" });
-    await env.DB.prepare("INSERT INTO recipients (message_id, kind, address, name) VALUES (1, 'to', 'thomas@planigramme.fr', 'Thomas')").run();
+    await env.DB.prepare("INSERT INTO recipients (message_id, kind, address, name) VALUES (1, 'to', 'thomas@example.com', 'Thomas')").run();
     await env.DB.prepare("INSERT INTO attachments (id, message_id, filename, mime_type, size, r2_key) VALUES (1, 1, 'f.pdf', 'application/pdf', 42, 'att/x/0-f.pdf')").run();
 
     const t = await getThread(env.DB, 1);
     expect(t?.subject).toBe("Facture");
-    expect(t?.messages[0].to).toEqual([{ address: "thomas@planigramme.fr", name: "Thomas" }]);
+    expect(t?.messages[0].to).toEqual([{ address: "thomas@example.com", name: "Thomas" }]);
     expect(t?.messages[0].attachments).toEqual([{ id: 1, filename: "f.pdf", mimeType: "application/pdf", size: 42 }]);
   });
 
@@ -160,7 +160,7 @@ describe("getThread", () => {
       );
       statements.push(
         env.DB.prepare(
-          "INSERT INTO recipients (message_id, kind, address, name) VALUES (?, 'to', 'thomas@planigramme.fr', NULL)"
+          "INSERT INTO recipients (message_id, kind, address, name) VALUES (?, 'to', 'thomas@example.com', NULL)"
         ).bind(i)
       );
     }
@@ -173,7 +173,7 @@ describe("getThread", () => {
 
     const t = await getThread(env.DB, 1);
     expect(t?.messages).toHaveLength(120);
-    expect(t?.messages[0].to).toEqual([{ address: "thomas@planigramme.fr", name: null }]);
+    expect(t?.messages[0].to).toEqual([{ address: "thomas@example.com", name: null }]);
     expect(t?.messages[119].attachments).toHaveLength(1);
   });
 
@@ -184,9 +184,9 @@ describe("getThread", () => {
 
 describe("listIdentities", () => {
   it("retourne l'identité par défaut en premier", async () => {
-    await env.DB.prepare("INSERT INTO identities (address, display_name, is_default) VALUES ('b@planigramme.fr', 'B', 0), ('a@planigramme.fr', 'A', 1)").run();
+    await env.DB.prepare("INSERT INTO identities (address, display_name, is_default) VALUES ('b@example.com', 'B', 0), ('a@example.com', 'A', 1)").run();
     const ids = await listIdentities(env.DB);
-    expect(ids[0]).toEqual({ address: "a@planigramme.fr", displayName: "A", isDefault: true });
+    expect(ids[0]).toEqual({ address: "a@example.com", displayName: "A", isDefault: true });
   });
 });
 
@@ -216,7 +216,7 @@ describe("routes /api", () => {
   });
 
   it("répond 200 sur GET /api/identities", async () => {
-    await env.DB.prepare("INSERT INTO identities (address, display_name, is_default) VALUES ('a@planigramme.fr', 'A', 1)").run();
+    await env.DB.prepare("INSERT INTO identities (address, display_name, is_default) VALUES ('a@example.com', 'A', 1)").run();
     const res = await app.request("https://example.com/api/identities", {}, { ...env, DEV_BYPASS_AUTH: "1" });
     expect(res.status).toBe(200);
   });

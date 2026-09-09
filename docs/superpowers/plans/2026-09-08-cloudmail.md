@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Construire un client webmail personnel sur `mail.planigramme.fr` qui reçoit les emails de `planigramme.fr` via Cloudflare Email Routing et les envoie via Cloudflare Email Sending.
+**Goal:** Construire un client webmail personnel sur `mail.example.com` qui reçoit les emails de `example.com` via Cloudflare Email Routing et les envoie via Cloudflare Email Sending.
 
 **Architecture:** Un Worker unique porte trois responsabilités : un handler `email()` qui persiste les messages entrants (MIME brut en R2, métadonnées en D1), une API REST Hono sous `/api` protégée par Cloudflare Access, et le service du SPA React via le binding `assets`. Le MIME brut est écrit en R2 **avant** tout parsing, de sorte qu'aucun message ne peut être perdu.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Domaine unique : `planigramme.fr`. Application déployée sur `mail.planigramme.fr`.
+- Domaine unique : `example.com`. Application déployée sur `mail.example.com`.
 - Plan Workers Paid requis (Email Sending). Email Routing gratuit.
 - **Limite dure de 5 MiB** par message envoyé, pièces jointes encodées en base64 comprises. Vérifiée côté front **et** côté Worker.
 - Le handler `email()` ne doit **jamais** lever d'exception ni appeler `setReject()`.
@@ -105,7 +105,7 @@ Remplacer `<D1_ID>` par l'identifiant retourné à l'étape 3.
   "vars": {
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    "ALLOWED_EMAILS": "thomas.stocker.pro@gmail.com"
+    "ALLOWED_EMAILS": "vous@example.com"
   }
 }
 ```
@@ -458,7 +458,7 @@ Créer six fichiers dans `test/fixtures/` avec ce contenu exact (les `.eml` util
 simple.eml
 ---
 From: Zoé Martin <zoe@example.com>
-To: thomas@planigramme.fr
+To: vous@example.com
 Subject: =?utf-8?B?RmFjdHVyZSByw6lnbMOpZQ==?=
 Message-ID: <simple-1@example.com>
 Date: Mon, 08 Sep 2026 10:00:00 +0200
@@ -471,7 +471,7 @@ Bonjour, la facture est réglée.
 multipart.eml
 ---
 From: bot@example.com
-To: thomas@planigramme.fr, autre@planigramme.fr
+To: vous@example.com, autre@example.com
 Cc: chef@example.com
 Subject: Rapport
 Message-ID: <multi-1@example.com>
@@ -493,7 +493,7 @@ Content-Type: text/html; charset=utf-8
 attachment.eml
 ---
 From: a@example.com
-To: thomas@planigramme.fr
+To: vous@example.com
 Subject: Avec PJ
 Message-ID: <att-1@example.com>
 Date: Mon, 08 Sep 2026 12:00:00 +0200
@@ -516,7 +516,7 @@ YSxiLGMKMSwyLDMK
 inline-image.eml
 ---
 From: a@example.com
-To: thomas@planigramme.fr
+To: vous@example.com
 Subject: Image inline
 Message-ID: <inline-1@example.com>
 Date: Mon, 08 Sep 2026 13:00:00 +0200
@@ -540,7 +540,7 @@ iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAA
 latin1.eml
 ---
 From: a@example.com
-To: thomas@planigramme.fr
+To: vous@example.com
 Subject: =?ISO-8859-1?Q?R=E9union?=
 Message-ID: <latin1-1@example.com>
 Date: Mon, 08 Sep 2026 14:00:00 +0200
@@ -580,7 +580,7 @@ describe("parseEmail", () => {
 
   it("extrait les destinataires multiples et le HTML", async () => {
     const m = await parseEmail(await load("multipart.eml"), "bot@example.com");
-    expect(m.to.map((a) => a.address)).toEqual(["thomas@planigramme.fr", "autre@planigramme.fr"]);
+    expect(m.to.map((a) => a.address)).toEqual(["vous@example.com", "autre@example.com"]);
     expect(m.cc.map((a) => a.address)).toEqual(["chef@example.com"]);
     expect(m.html).toContain("<b>HTML</b>");
     expect(m.text).toContain("Version texte");
@@ -818,7 +818,7 @@ beforeEach(async () => {
 const msg = (over: Partial<ParsedMessage>): ParsedMessage => ({
   messageId: "<m1@x>", inReplyTo: null, references: [],
   from: { address: "zoe@example.com", name: null },
-  to: [{ address: "thomas@planigramme.fr", name: null }],
+  to: [{ address: "vous@example.com", name: null }],
   cc: [], replyTo: [], subject: "Facture", text: "", html: null,
   date: 1757318400, attachments: [], parseError: false, ...over,
 });
@@ -833,7 +833,7 @@ const seed = async (messageId: string, subject: string, threadId: number, at = 1
   ).bind(threadId, messageId, subject, at).run();
   await env.DB.prepare(
     `INSERT INTO recipients (message_id, kind, address)
-     VALUES ((SELECT id FROM messages WHERE message_id = ?), 'to', 'thomas@planigramme.fr')`
+     VALUES ((SELECT id FROM messages WHERE message_id = ?), 'to', 'vous@example.com')`
   ).bind(messageId).run();
 };
 
@@ -1019,7 +1019,7 @@ const load = async (name: string): Promise<ArrayBuffer> => {
   return new TextEncoder().encode(mod.default).buffer;
 };
 
-const envelope = { from: "zoe@example.com", to: "thomas@planigramme.fr" };
+const envelope = { from: "zoe@example.com", to: "vous@example.com" };
 
 describe("storeIncoming", () => {
   it("écrit le MIME brut dans R2 et le message dans D1", async () => {
@@ -1052,8 +1052,8 @@ describe("storeIncoming", () => {
     ).bind(res.messageId).all<{ kind: string; address: string }>();
     expect(rows.results).toEqual([
       { kind: "cc", address: "chef@example.com" },
-      { kind: "to", address: "autre@planigramme.fr" },
-      { kind: "to", address: "thomas@planigramme.fr" },
+      { kind: "to", address: "autre@example.com" },
+      { kind: "to", address: "vous@example.com" },
     ]);
   });
 
@@ -1268,7 +1268,7 @@ const fakeMessage = async (fixture: string) => {
   const bytes = new TextEncoder().encode(mod.default);
   return {
     from: "zoe@example.com",
-    to: "thomas@planigramme.fr",
+    to: "vous@example.com",
     rawSize: bytes.byteLength,
     raw: new Response(bytes).body!,
     headers: new Headers(),
@@ -1416,12 +1416,12 @@ const testEnv = () => ({
   ...env,
   ACCESS_TEAM_DOMAIN: "acme.cloudflareaccess.com",
   ACCESS_AUD: "aud-123",
-  ALLOWED_EMAILS: "thomas.stocker.pro@gmail.com",
+  ALLOWED_EMAILS: "vous@example.com",
   DEV_BYPASS_AUTH: undefined,
 });
 
 const token = async (over: { email?: string; aud?: string; exp?: string } = {}) =>
-  new SignJWT({ email: over.email ?? "thomas.stocker.pro@gmail.com" })
+  new SignJWT({ email: over.email ?? "vous@example.com" })
     .setProtectedHeader({ alg: "RS256", kid: "k1" })
     .setIssuer("https://acme.cloudflareaccess.com")
     .setAudience(over.aud ?? "aud-123")
@@ -1432,7 +1432,7 @@ const token = async (over: { email?: string; aud?: string; exp?: string } = {}) 
 describe("verifyAccessJwt", () => {
   it("accepte un jeton valide et retourne l'email", async () => {
     const id = await verifyAccessJwt(testEnv(), await token());
-    expect(id.email).toBe("thomas.stocker.pro@gmail.com");
+    expect(id.email).toBe("vous@example.com");
   });
 
   it("refuse une audience incorrecte", async () => {
@@ -1683,12 +1683,12 @@ describe("getThread", () => {
   it("retourne les messages avec destinataires et pièces jointes", async () => {
     await insertThread(1, "facture", 100);
     await insertMessage(1, 1, { subject: "Facture" });
-    await env.DB.prepare("INSERT INTO recipients (message_id, kind, address, name) VALUES (1, 'to', 'thomas@planigramme.fr', 'Thomas')").run();
+    await env.DB.prepare("INSERT INTO recipients (message_id, kind, address, name) VALUES (1, 'to', 'vous@example.com', 'Thomas')").run();
     await env.DB.prepare("INSERT INTO attachments (id, message_id, filename, mime_type, size, r2_key) VALUES (1, 1, 'f.pdf', 'application/pdf', 42, 'att/x/0-f.pdf')").run();
 
     const t = await getThread(env.DB, 1);
     expect(t?.subject).toBe("Facture");
-    expect(t?.messages[0].to).toEqual([{ address: "thomas@planigramme.fr", name: "Thomas" }]);
+    expect(t?.messages[0].to).toEqual([{ address: "vous@example.com", name: "Thomas" }]);
     expect(t?.messages[0].attachments).toEqual([{ id: 1, filename: "f.pdf", mimeType: "application/pdf", size: 42 }]);
   });
 
@@ -1699,9 +1699,9 @@ describe("getThread", () => {
 
 describe("listIdentities", () => {
   it("retourne l'identité par défaut en premier", async () => {
-    await env.DB.prepare("INSERT INTO identities (address, display_name, is_default) VALUES ('b@planigramme.fr', 'B', 0), ('a@planigramme.fr', 'A', 1)").run();
+    await env.DB.prepare("INSERT INTO identities (address, display_name, is_default) VALUES ('b@example.com', 'B', 0), ('a@example.com', 'A', 1)").run();
     const ids = await listIdentities(env.DB);
-    expect(ids[0]).toEqual({ address: "a@planigramme.fr", displayName: "A", isDefault: true });
+    expect(ids[0]).toEqual({ address: "a@example.com", displayName: "A", isDefault: true });
   });
 });
 ```
@@ -2544,7 +2544,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { sendEmail, payloadSize, SendError, type SendRequest } from "../../src/send/client";
 
 const base: SendRequest = {
-  from: "thomas@planigramme.fr",
+  from: "vous@example.com",
   to: ["zoe@example.com"],
   subject: "Bonjour",
   text: "Salut",
@@ -2566,7 +2566,7 @@ describe("sendEmail", () => {
     expect(calls[0].url).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/email/sending/send");
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
     expect(JSON.parse(calls[0].init.body as string)).toMatchObject({
-      from: "thomas@planigramme.fr",
+      from: "vous@example.com",
       to: ["zoe@example.com"],
       subject: "Bonjour",
       text: "Salut",
@@ -2741,7 +2741,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM identities"),
   ]);
   await env.DB.prepare(
-    "INSERT INTO identities (address, display_name, is_default) VALUES ('thomas@planigramme.fr', 'Thomas', 1)"
+    "INSERT INTO identities (address, display_name, is_default) VALUES ('vous@example.com', 'Thomas', 1)"
   ).run();
 });
 
@@ -2760,7 +2760,7 @@ const post = (body: unknown) =>
   );
 
 const valid = {
-  from: "thomas@planigramme.fr",
+  from: "vous@example.com",
   to: ["zoe@example.com"],
   subject: "Bonjour",
   text: "Salut",
@@ -2776,7 +2776,7 @@ describe("POST /api/messages", () => {
       "SELECT direction, folder, from_addr, subject, is_read FROM messages"
     ).first<Record<string, unknown>>();
     expect(m).toMatchObject({
-      direction: "out", folder: "sent", from_addr: "thomas@planigramme.fr", subject: "Bonjour", is_read: 1,
+      direction: "out", folder: "sent", from_addr: "vous@example.com", subject: "Bonjour", is_read: 1,
     });
   });
 
@@ -2952,7 +2952,7 @@ api.post("/messages", async (c) => {
     );
   }
 
-  const messageId = `<${crypto.randomUUID()}@planigramme.fr>`;
+  const messageId = `<${crypto.randomUUID()}@example.com>`;
   const id = await storeOutgoing(c.env, req, messageId);
   return c.json({ id, ...result });
 });
@@ -3404,7 +3404,7 @@ const wrap = (ui: React.ReactElement) => {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 };
 
-const identities = [{ address: "thomas@planigramme.fr", displayName: "Thomas", isDefault: true }];
+const identities = [{ address: "vous@example.com", displayName: "Thomas", isDefault: true }];
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -3424,7 +3424,7 @@ describe("Composer", () => {
     await waitFor(() => {
       const body = JSON.parse((vi.mocked(fetch).mock.calls.at(-1)![1] as RequestInit).body as string);
       expect(body).toMatchObject({
-        from: "thomas@planigramme.fr", to: ["zoe@example.com"], subject: "Bonjour", text: "Salut",
+        from: "vous@example.com", to: ["zoe@example.com"], subject: "Bonjour", text: "Salut",
       });
     });
   });
@@ -3517,12 +3517,12 @@ git commit -m "feat: ajoute la composition et la réponse avec pièces jointes"
 
 **Interfaces:**
 - Consumes: l'ensemble des tâches précédentes
-- Produces: une application déployée et joignable sur `mail.planigramme.fr`.
+- Produces: une application déployée et joignable sur `mail.example.com`.
 
 - [ ] **Step 1: Ajouter la route personnalisée dans `wrangler.jsonc`**
 
 ```jsonc
-"routes": [{ "pattern": "mail.planigramme.fr", "custom_domain": true }]
+"routes": [{ "pattern": "mail.example.com", "custom_domain": true }]
 ```
 
 - [ ] **Step 2: Créer le token API et poser les secrets**
@@ -3538,7 +3538,7 @@ Renseigner `ACCESS_TEAM_DOMAIN` et `ACCESS_AUD` dans la section `vars` de `wrang
 
 - [ ] **Step 3: Vérifier le domaine dans Email Service**
 
-Dans le tableau de bord : Email → Email Service → Sending → ajouter `planigramme.fr` et publier les enregistrements DNS demandés. Attendre le statut « verified ».
+Dans le tableau de bord : Email → Email Service → Sending → ajouter `example.com` et publier les enregistrements DNS demandés. Attendre le statut « verified ».
 
 - [ ] **Step 4: Activer Email Routing vers le Worker**
 
@@ -3546,13 +3546,13 @@ Email → Email Routing → activer, puis créer une règle catch-all « Send to
 
 - [ ] **Step 5: Créer l'application Cloudflare Access**
 
-Zero Trust → Access → Applications → Self-hosted, domaine `mail.planigramme.fr`, politique « Emails » limitée à `thomas.stocker.pro@gmail.com`. Copier l'Application Audience (AUD) dans `ACCESS_AUD` et le team domain dans `ACCESS_TEAM_DOMAIN`.
+Zero Trust → Access → Applications → Self-hosted, domaine `mail.example.com`, politique « Emails » limitée à `vous@example.com`. Copier l'Application Audience (AUD) dans `ACCESS_AUD` et le team domain dans `ACCESS_TEAM_DOMAIN`.
 
 - [ ] **Step 6: Peupler les identités**
 
 ```bash
 pnpm wrangler d1 execute cloudmail --remote --command \
-  "INSERT INTO identities (address, display_name, is_default) VALUES ('thomas@planigramme.fr', 'Thomas Stocker', 1)"
+  "INSERT INTO identities (address, display_name, is_default) VALUES ('vous@example.com', 'Thomas Stocker', 1)"
 ```
 
 - [ ] **Step 7: Déployer**
@@ -3563,8 +3563,8 @@ pnpm deploy
 
 - [ ] **Step 8: Vérifier de bout en bout**
 
-1. Ouvrir `https://mail.planigramme.fr` → l'écran de connexion Access s'affiche, puis le webmail.
-2. Depuis une adresse externe, envoyer un email à `thomas@planigramme.fr` → il apparaît dans la boîte de réception en moins d'une minute.
+1. Ouvrir `https://mail.example.com` → l'écran de connexion Access s'affiche, puis le webmail.
+2. Depuis une adresse externe, envoyer un email à `vous@example.com` → il apparaît dans la boîte de réception en moins d'une minute.
 3. Ouvrir le message, vérifier l'affichage du corps et le blocage des images distantes.
 4. Répondre → l'email arrive côté destinataire, et la réponse s'affiche dans le même thread.
 5. Envoyer un email avec pièce jointe dans les deux sens et vérifier le téléchargement.

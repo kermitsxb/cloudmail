@@ -24,7 +24,7 @@ beforeEach(async () => {
 const msg = (over: Partial<ParsedMessage>): ParsedMessage => ({
   messageId: "<m1@x>", inReplyTo: null, references: [],
   from: { address: "zoe@example.com", name: null },
-  to: [{ address: "thomas@planigramme.fr", name: null }],
+  to: [{ address: "thomas@example.com", name: null }],
   cc: [], replyTo: [], subject: "Facture", text: "", html: null,
   date: 1757318400, attachments: [], parseError: false, ...over,
 });
@@ -39,7 +39,7 @@ const seed = async (messageId: string, subject: string, threadId: number, at = 1
   ).bind(threadId, messageId, subject, at).run();
   await env.DB.prepare(
     `INSERT INTO recipients (message_id, kind, address)
-     VALUES ((SELECT id FROM messages WHERE message_id = ?), 'to', 'thomas@planigramme.fr')`
+     VALUES ((SELECT id FROM messages WHERE message_id = ?), 'to', 'thomas@example.com')`
   ).bind(messageId).run();
 };
 

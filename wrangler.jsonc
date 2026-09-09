@@ -5,7 +5,10 @@
   "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  "routes": [{ "pattern": "mail.planigramme.fr", "custom_domain": true }],
+  // Remplacer "mail.example.com" par le sous-domaine sur lequel Cloudmail doit être
+  // exposé (voir la section « Mise en service » du README). Ce domaine doit être géré
+  // sur le compte Cloudflare qui héberge le Worker.
+  "routes": [{ "pattern": "mail.example.com", "custom_domain": true }],
   "assets": {
     "directory": "./web/dist",
     "binding": "ASSETS",
@@ -30,6 +33,10 @@
   "vars": {
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    "ALLOWED_EMAILS": "thomas.stocker.pro@gmail.com"
+    "ALLOWED_EMAILS": "",
+    // Domaine utilisé pour générer le Message-ID des emails envoyés (voir
+    // src/api/routes.ts). Doit correspondre au domaine géré à l'étape 5 de la
+    // section « Mise en service » du README (Email Service / Sending).
+    "MAIL_DOMAIN": "example.com"
   }
 }
