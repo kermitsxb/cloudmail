@@ -131,3 +131,64 @@ export const useUpdateMessage = () => {
     },
   });
 };
+
+// Miroir volontaire de ForwardRule dans src/forwarding/rules.ts, comme les types
+// ci-dessus : le SPA et le Worker sont deux cibles de build distinctes.
+export type ForwardRule = {
+  id: number;
+  matchLocal: string;
+  destination: string;
+  enabled: boolean;
+  createdAt: number;
+  lastAttemptAt: number | null;
+  lastStatus: "ok" | "error" | null;
+  lastError: string | null;
+};
+
+export type AppConfig = { mailDomain: string };
+
+export const useConfig = () =>
+  useQuery({ queryKey: ["config"], queryFn: () => api<AppConfig>("/config") });
+
+export const useForwardRules = () =>
+  useQuery({ queryKey: ["forwardRules"], queryFn: () => api<ForwardRule[]>("/forwarding/rules") });
+
+// retry: false — un 503 « routing_unavailable » traduit une configuration
+// manquante, pas un incident passager : réessayer ne changerait rien et
+// retarderait l'affichage du message qui explique quoi faire.
+export const useForwardDestinations = () =>
+  useQuery({
+    queryKey: ["forwardDestinations"],
+    queryFn: () => api<{ destinations: string[] }>("/forwarding/destinations"),
+    retry: false,
+  });
+
+export const useCreateForwardRule = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { matchLocal: string; destination: string }) =>
+      api<ForwardRule>("/forwarding/rules", { method: "POST", body: JSON.stringify(vars) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["forwardRules"] }),
+  });
+};
+
+export const useUpdateForwardRule = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; enabled: boolean }) =>
+      api<{ ok: true }>(`/forwarding/rules/${vars.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: vars.enabled }),
+      }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["forwardRules"] }),
+  });
+};
+
+export const useDeleteForwardRule = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      api<{ ok: true }>(`/forwarding/rules/${id}`, { method: "DELETE" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["forwardRules"] }),
+  });
+};
