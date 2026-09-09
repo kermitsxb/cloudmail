@@ -55,6 +55,16 @@ function renderThreadView() {
 }
 
 describe("ThreadView", () => {
+  it("affiche l'erreur au lieu de rester sur « Chargement… » quand la requête échoue", async () => {
+    vi.mocked(fetch).mockImplementation(async () =>
+      Response.json({ error: { code: "internal_error", message: "Erreur interne" } }, { status: 500 }),
+    );
+    renderThreadView();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Erreur interne/);
+    expect(screen.queryByText("Chargement…")).toBeNull();
+  });
+
+
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {

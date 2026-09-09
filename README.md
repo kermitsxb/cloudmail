@@ -45,6 +45,16 @@ Telles que définies dans `package.json` :
 
 ## Mise en service
 
+> **Les migrations deviennent immuables dès leur première application.** Tant que la base
+> distante n'existe pas, `migrations/0001_initial.sql` peut encore être modifiée en place.
+> Après la première application (étape 2 ci-dessous), toute évolution du schéma passe par un
+> nouveau fichier `migrations/000N_*.sql` : D1 enregistre les migrations déjà jouées par leur
+> nom, donc une modification a posteriori ne serait jamais rejouée et la base garderait
+> silencieusement l'ancien schéma. Si une base **locale** de développement se retrouve dans
+> cet état, la réinitialiser suffit : `rm -rf .wrangler/state/v3/d1 .wrangler/state/v3/r2`
+> puis `pnpm wrangler d1 migrations apply cloudmail --local`.
+
+
 Ces étapes touchent le compte Cloudflare payant de l'utilisateur et rendent le
 service public : elles ne sont **pas** automatisées et doivent être exécutées à
 la main, dans l'ordre, par la personne qui opère le compte.
