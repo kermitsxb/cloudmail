@@ -67,12 +67,44 @@ const forwardRuleBody = z.object({
 
 const forwardRulePatchBody = z.object({ enabled: z.boolean() });
 
+// `ZodError.message` est un JSON.stringify des issues (en anglais) : impossible
+// à afficher tel quel à l'utilisateur, qui verrait un dump de la sérialisation
+// interne de zod plutôt qu'une phrase compréhensible. Ce helper construit à la
+// place un message en français, à partir des chemins de champs en erreur.
+const formatValidationError = (error: z.ZodError): string => {
+  const champs = error.issues.map((issue) => issue.path.join(".") || "le corps de la requête");
+  return `Requête invalide : vérifiez ${champs.join(", ")}.`;
+};
+
+// Réponse 503 commune aux deux routes qui interrogent la liste des destinations
+// vérifiées : elles doivent réagir de façon identique à une panne côté API
+// Cloudflare Email Routing (« inconnu », pas une liste vide ni une erreur 500).
+const routingUnavailableResponse = () =>
+  Response.json({
+    error: {
+      code: "routing_unavailable",
+      message: "Impossible de lire les destinations vérifiées du compte Cloudflare",
+    },
+  }, { status: 503 });
+
+// Récupère la liste des destinations vérifiées, ou la réponse 503 à renvoyer si
+// l'API Cloudflare est inaccessible. Toute autre exception continue de remonter
+// (elle sera traitée par le gestionnaire d'erreurs global, en 500).
+async function listVerifiedDestinationsOrResponse(env: Env): Promise<string[] | Response> {
+  try {
+    return await listVerifiedDestinations(env);
+  } catch (err) {
+    if (err instanceof RoutingUnavailableError) return routingUnavailableResponse();
+    throw err;
+  }
+}
+
 export const api = new Hono<ApiEnv>();
 
 api.get("/threads", async (c) => {
   const parsed = listQuery.safeParse(c.req.query());
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_query", message: parsed.error.message } }, 400);
+    return c.json({ error: { code: "invalid_query", message: formatValidationError(parsed.error) } }, 400);
   }
   return c.json(await listThreads(c.env.DB, parsed.data));
 });
@@ -146,7 +178,7 @@ api.patch("/messages/:id", async (c) => {
   }
   const parsed = patchBody.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_body", message: parsed.error.message } }, 400);
+    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
   }
   // Non atomique entre les deux appels : quand isRead et folder sont fournis ensemble,
   // setRead et moveToFolder s'exécutent dans deux `batch` D1 indépendants. Un échec entre les
@@ -319,26 +351,14 @@ api.get("/forwarding/rules", async (c) => c.json(await listForwardRules(c.env.DB
 api.post("/forwarding/rules", async (c) => {
   const parsed = forwardRuleBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_body", message: parsed.error.message } }, 400);
+    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
   }
 
   // La liste fermée côté interface est un confort, pas une garantie : on
   // revalide ici, car une destination non vérifiée ferait échouer le forward
   // silencieusement, longtemps après la création de la règle.
-  let destinations: string[];
-  try {
-    destinations = await listVerifiedDestinations(c.env);
-  } catch (err) {
-    if (err instanceof RoutingUnavailableError) {
-      return c.json({
-        error: {
-          code: "routing_unavailable",
-          message: "Impossible de lire les destinations vérifiées du compte Cloudflare",
-        },
-      }, 503);
-    }
-    throw err;
-  }
+  const destinations = await listVerifiedDestinationsOrResponse(c.env);
+  if (destinations instanceof Response) return destinations;
 
   const destination = parsed.data.destination;
   if (!destinations.some((d) => d.toLowerCase() === destination.toLowerCase())) {
@@ -366,7 +386,7 @@ api.patch("/forwarding/rules/:id", async (c) => {
   }
   const parsed = forwardRulePatchBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_body", message: parsed.error.message } }, 400);
+    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
   }
   const found = await setForwardRuleEnabled(c.env.DB, id, parsed.data.enabled);
   if (!found) {
@@ -387,20 +407,10 @@ api.delete("/forwarding/rules/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// 503 et non une liste vide : « je ne sais pas » ne doit pas se lire comme
+// « le compte n'a aucune destination », l'interface les affiche différemment.
 api.get("/forwarding/destinations", async (c) => {
-  try {
-    return c.json({ destinations: await listVerifiedDestinations(c.env) });
-  } catch (err) {
-    if (err instanceof RoutingUnavailableError) {
-      // 503 et non une liste vide : « je ne sais pas » ne doit pas se lire comme
-      // « le compte n'a aucune destination », l'interface les affiche différemment.
-      return c.json({
-        error: {
-          code: "routing_unavailable",
-          message: "Impossible de lire les destinations vérifiées du compte Cloudflare",
-        },
-      }, 503);
-    }
-    throw err;
-  }
+  const destinations = await listVerifiedDestinationsOrResponse(c.env);
+  if (destinations instanceof Response) return destinations;
+  return c.json({ destinations });
 });
