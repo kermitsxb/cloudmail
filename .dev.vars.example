@@ -13,3 +13,4 @@ DEV_BYPASS_AUTH=1
 # des valeurs factices, l'envoi échouera simplement.
 CF_ACCOUNT_ID=
 CF_API_TOKEN=
+CF_ROUTING_TOKEN=
