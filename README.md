@@ -26,8 +26,14 @@ destination vérifiée sur le compte Cloudflare. À la réception, `handleEmail`
 (`src/email.ts`) applique **toutes** les règles qui correspondent au
 destinataire, catch-all comprise, et dédoublonne les destinations identiques.
 Le forward précède l'archivage, parce que `message.raw` est un `ReadableStream`
-à usage unique ; les deux étapes sont isolées, si bien qu'un échec de
-redirection ne coûte jamais l'archivage. Cette séparation est ce qui permet
+à usage unique ; les deux étapes sont isolées. Ce que cette isolation garantit
+exactement : une **exception** levée par le forward ou par la lecture des règles
+est rattrapée et n'empêche pas l'archivage, et un forward qui **bloque** est
+abandonné au bout de dix secondes par destination (`FORWARD_TIMEOUT_MS` dans
+`src/email.ts`) pour que l'archivage garde du temps d'exécution — sans cette
+borne, un forward qui ne rend jamais la main laisserait le message sans objet R2
+ni ligne D1, puisque rien n'est encore écrit à ce moment-là. Aucune de ces
+situations n'appelle `setReject`. Cette séparation est ce qui permet
 qu'un message arrive à la fois dans Cloudmail et dans une boîte externe :
 Cloudflare Email Routing ne sait livrer qu'à un Worker **ou** à une adresse,
 jamais aux deux.
@@ -36,9 +42,17 @@ jamais aux deux.
 
 - Un domaine à vous (ex. `example.com`) doit être géré sur Cloudflare (zone DNS
   active). Les instructions ci-dessous utilisent `example.com` et le
-  sous-domaine `mail.example.com` comme placeholders : remplacez-les par votre
+  sous-domaine `mail.example.com` comme exemples : remplacez-les par votre
   propre domaine partout où ils apparaissent (`wrangler.jsonc`, tableau de bord
   Cloudflare).
+- **`wrangler.jsonc` est versionné avec la configuration de l'instance de ce
+  dépôt**, pas avec des placeholders : la route `mail.planigramme.fr`, le
+  `database_id` de sa base D1 et son `MAIL_DOMAIN` sont des valeurs réelles.
+  Rien de secret n'y figure (un `database_id` n'est pas un identifiant
+  d'authentification, et les secrets vivent dans `wrangler secret`), mais aucune
+  de ces valeurs ne vous concerne : remplacez les trois par les vôtres avant tout
+  déploiement, sinon `wrangler deploy` réclamera une zone et une base que votre
+  compte ne possède pas.
 - Un plan **Workers Paid** est nécessaire pour utiliser Email Sending (l'API
   d'envoi utilisée par `src/send/client.ts`). Email Routing, utilisé pour la
   réception, est gratuit et ne nécessite pas ce plan.
@@ -52,8 +66,8 @@ Telles que définies dans `package.json` :
 - `pnpm dev` — lance en parallèle `pnpm wrangler dev` (le Worker, avec D1 et R2
   simulés localement par Miniflare) et `pnpm --filter web dev` (le serveur de dev
   Vite du SPA).
-- `pnpm test` — exécute `vitest run` (189 tests côté Worker : ingestion, API,
-  auth, envoi) puis `pnpm --filter web test` (24 tests côté SPA).
+- `pnpm test` — exécute `vitest run` (247 tests côté Worker : ingestion, API,
+  auth, envoi, redirections) puis `pnpm --filter web test` (51 tests côté SPA).
 - `pnpm build` — construit uniquement le SPA (`pnpm --filter web build`), dont la
   sortie (`web/dist`) est servie par le Worker via le binding `ASSETS`.
 - `pnpm run deploy` — enchaîne `pnpm build` puis `pnpm wrangler deploy` :
@@ -96,25 +110,27 @@ pnpm wrangler r2 bucket create cloudmail
 ```
 
 La commande `d1 create` affiche un `database_id`. Reporter cette valeur dans
-`wrangler.jsonc`, à la place du placeholder `"local"` actuellement présent dans
-`d1_databases[0].database_id` :
+`wrangler.jsonc`, à la place de celle qui y figure — celle de la base de
+l'instance de ce dépôt, sur un autre compte que le vôtre :
 
 ```jsonc
 "d1_databases": [
   {
     "binding": "DB",
     "database_name": "cloudmail",
-    "database_id": "REMPLACER_PAR_LE_VRAI_ID", // était "local"
+    "database_id": "REMPLACER_PAR_VOTRE_ID",
     "migrations_dir": "migrations"
   }
 ]
 ```
 
-Si cette étape est oubliée, `wrangler deploy` échoue (ou pire, tente de lier une
-base D1 inexistante nommée `local`) : le Worker déployé n'a pas de base de
-données fonctionnelle. Le placeholder `"local"` ne fonctionne qu'en local, où
-Miniflare simule D1 sans authentification Cloudflare — voir le commentaire dans
-`wrangler.jsonc`.
+Profiter du même passage pour remplacer la route `mail.planigramme.fr` par votre
+propre sous-domaine, et `vars.MAIL_DOMAIN` par votre domaine (celui de l'étape
+5). Si cette étape est oubliée, `wrangler deploy` échoue : votre compte n'a ni
+cette zone ni cette base D1, et le Worker déployé n'aurait de toute façon pas de
+base de données fonctionnelle. Ces valeurs ne servent qu'au distant : en local,
+`wrangler dev` et les tests Vitest ne les lisent pas, Miniflare simulant D1 et R2
+sans authentification Cloudflare — voir le commentaire dans `wrangler.jsonc`.
 
 ### 2. Appliquer les migrations en distant
 
@@ -122,11 +138,23 @@ Miniflare simule D1 sans authentification Cloudflare — voir le commentaire dan
 pnpm wrangler d1 migrations apply cloudmail --remote
 ```
 
-Cette étape crée les tables (`identities`, `threads`, `messages`, ...) définies
-dans `migrations/0001_initial.sql` sur la base D1 distante. Elle ne dépend que de
-l'étape 1 (base créée, `database_id` renseigné) : ni du Worker, ni d'Access, ni
-d'Email Routing. Si elle est oubliée, toute requête D1 échoue avec « no such
-table » — y compris celles du handler `email()`, dont l'échec est silencieux.
+Cette étape applique **toutes** les migrations du dossier `migrations/` : les
+tables (`identities`, `threads`, `messages`, ...) de `0001_initial.sql`, puis la
+table `forward_rules` de `0002_forward_rules.sql`. Elle ne dépend que de l'étape
+1 (base créée, `database_id` renseigné) : ni du Worker, ni d'Access, ni d'Email
+Routing. Si elle est oubliée, toute requête D1 échoue avec « no such table » — y
+compris celles du handler `email()`, dont l'échec est silencieux.
+
+**Sur une installation déjà déployée, cette commande est à rejouer avant de
+déployer cette version.** D1 n'applique que les migrations qu'il n'a pas encore
+enregistrées, donc la rejouer sur une base à jour ne coûte rien ; l'omettre, en
+revanche, ne casse rien de visible et c'est précisément le problème. Sans
+`forward_rules`, `GET /api/forwarding/rules` répond 500 et la vue
+« Redirections » affiche son message d'erreur au lieu de la liste, tandis que
+chaque message entrant fait échouer la lecture des règles : `handleEmail` log
+`forward_rules_failed` et archive normalement. Aucun courrier n'est donc perdu ni
+rejeté, mais aucune redirection n'a lieu — la fonctionnalité est silencieusement
+absente, et le reste jusqu'à ce que la migration soit appliquée.
 
 ### 3. Peupler la table `identities`
 
@@ -195,13 +223,21 @@ elle exige donc que tout ce dont l'ingestion a besoin existe déjà — le Worke
 déployé (étape 4), le bucket R2 (étape 1) et surtout les tables D1 (étape 2).
 C'est la raison de la position de cette étape dans la séquence.
 
-**Attention aux règles littérales déjà en place.** Une règle Email Routing sur
-une adresse précise passe **avant** le catch-all : tant qu'elle existe, le
-Worker ne voit jamais cette adresse, et Cloudmail n'en archive rien. Si le
-domaine porte déjà des règles de forwarding (par exemple `contact@` vers une
-boîte Gmail), il faut les supprimer et recréer les redirections équivalentes
-depuis l'interface « Redirections » de Cloudmail — c'est le Worker qui reprend
-alors le forward, en plus de l'archivage.
+**Attention aux règles littérales déjà en place — mais ne les supprimez pas
+maintenant.** Une règle Email Routing sur une adresse précise passe **avant** le
+catch-all : tant qu'elle existe, le Worker ne voit jamais cette adresse, et
+Cloudmail n'en archive rien. Si le domaine porte déjà des règles de forwarding
+(par exemple `contact@` vers une boîte Gmail), c'est bien au Worker de reprendre
+leur forward, en plus de l'archivage — mais il n'en est pas encore capable. À
+cette étape, l'interface « Redirections » est injoignable et inutilisable :
+l'application Access n'existe pas (étape 7), le secret `CF_ROUTING_TOKEN` n'est
+pas posé (étape 9) et le Worker n'a pas été redéployé avec ces valeurs (étape
+10), si bien que le formulaire ne peut lister aucune destination vérifiée et
+qu'aucune règle ne peut être créée. Supprimer les règles littérales ici ouvrirait
+donc une fenêtre allant jusqu'à l'étape 10 pendant laquelle tout est archivé mais
+**rien n'est redirigé** vers la boîte externe — exactement la régression que les
+redirections gérées depuis Cloudmail existent pour éviter. La bascule se fait en
+dernier : voir « Reprendre les redirections » à la fin de l'étape 10.
 
 Recréer une redirection **catch-all** vers une boîte externe plutôt que des
 règles nominatives forwarde aussi tout le courrier adressé à des adresses
@@ -278,6 +314,22 @@ cette exécution qui rend le service effectivement utilisable en production ;
 tant qu'elle n'a pas eu lieu après les étapes précédentes, l'authentification
 Access et l'envoi d'email restent non fonctionnels malgré un Worker déjà en
 ligne depuis l'étape 4.
+
+**Reprendre les redirections (en dernier).** C'est seulement maintenant que
+l'interface « Redirections » est joignable et capable de lister les destinations
+vérifiées du compte, donc seulement maintenant que les règles de forwarding
+littérales évoquées à l'étape 6 peuvent être retirées d'Email Routing. Dans cet
+ordre, et pas l'inverse : créer d'abord dans Cloudmail la redirection équivalente
+à chaque règle littérale (`contact@` vers la même boîte externe, par exemple),
+puis supprimer les règles littérales du tableau de bord. Tant qu'une règle
+littérale existe, elle continue de livrer à la boîte externe et le Worker ne voit
+pas l'adresse : la redirection Cloudmail créée en doublon reste simplement sans
+effet, et prend le relais à la seconde où la règle littérale disparaît. Aucune
+fenêtre sans redirection ne s'ouvre. Un message de test envoyé à l'adresse
+concernée après la bascule doit arriver **à la fois** dans Cloudmail et dans la
+boîte externe ; s'il n'arrive que dans Cloudmail, la règle correspondante est
+absente ou désactivée, et la ligne de l'interface affiche l'erreur de la dernière
+tentative.
 
 ## Rejeu d'un message (`reparse`)
 
