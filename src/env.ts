@@ -7,5 +7,6 @@ export interface Env {
   ACCESS_TEAM_DOMAIN: string;
   ACCESS_AUD: string;
   ALLOWED_EMAILS: string;
+  MAIL_DOMAIN: string;
   DEV_BYPASS_AUTH?: string;
 }

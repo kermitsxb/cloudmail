@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { sendEmail, payloadSize, SendError, type SendRequest } from "../../src/send/client";
 
 const base: SendRequest = {
-  from: "thomas@planigramme.fr",
+  from: "thomas@example.com",
   to: ["zoe@example.com"],
   subject: "Bonjour",
   text: "Salut",
@@ -25,7 +25,7 @@ describe("sendEmail", () => {
     expect(calls[0].url).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/email/sending/send");
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
     expect(JSON.parse(calls[0].init.body as string)).toMatchObject({
-      from: "thomas@planigramme.fr",
+      from: "thomas@example.com",
       to: ["zoe@example.com"],
       subject: "Bonjour",
       text: "Salut",

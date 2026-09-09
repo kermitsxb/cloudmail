@@ -23,7 +23,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM identities"),
   ]);
   await env.DB.prepare(
-    "INSERT INTO identities (address, display_name, is_default) VALUES ('thomas@planigramme.fr', 'Thomas', 1)"
+    "INSERT INTO identities (address, display_name, is_default) VALUES ('thomas@example.com', 'Thomas', 1)"
   ).run();
 });
 
@@ -42,7 +42,7 @@ const post = (body: unknown) =>
   );
 
 const valid = {
-  from: "thomas@planigramme.fr",
+  from: "thomas@example.com",
   to: ["zoe@example.com"],
   subject: "Bonjour",
   text: "Salut",
@@ -58,7 +58,7 @@ describe("POST /api/messages", () => {
       "SELECT direction, folder, from_addr, subject, is_read FROM messages"
     ).first<Record<string, unknown>>();
     expect(m).toMatchObject({
-      direction: "out", folder: "sent", from_addr: "thomas@planigramme.fr", subject: "Bonjour", is_read: 1,
+      direction: "out", folder: "sent", from_addr: "thomas@example.com", subject: "Bonjour", is_read: 1,
     });
   });
 

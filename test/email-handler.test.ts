@@ -35,7 +35,7 @@ const fakeMessage = (fixture: string) => {
   const bytes = loadBytes(fixture);
   return {
     from: "zoe@example.com",
-    to: "thomas@planigramme.fr",
+    to: "thomas@example.com",
     rawSize: bytes.byteLength,
     raw: new Response(bytes).body!,
     headers: new Headers(),
