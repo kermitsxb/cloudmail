@@ -80,6 +80,14 @@ describe("POST /api/forwarding/rules", () => {
     expect((await res.json() as { error: { code: string } }).error.code).toBe("invalid_body");
   });
 
+  it("renvoie un message d'erreur français lisible, pas un dump JSON de zod", async () => {
+    stubDestinations(["gmail@exemple.com"]);
+    const res = await postRule({ matchLocal: "a b@c", destination: "pas-un-email" });
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message.startsWith("[{")).toBe(false);
+    expect(body.error.message).toContain("Requête invalide");
+  });
+
   it("refuse une destination non vérifiée", async () => {
     stubDestinations(["gmail@exemple.com"]);
     const res = await postRule({ matchLocal: "contact", destination: "typo@exmple.com" });
@@ -144,6 +152,19 @@ describe("PATCH et DELETE /api/forwarding/rules/:id", () => {
 
   it("répond 400 sur un identifiant non numérique", async () => {
     expect((await req("/api/forwarding/rules/abc", { method: "DELETE" })).status).toBe(400);
+  });
+
+  it("PATCH renvoie aussi un message d'erreur français, pas un dump JSON de zod", async () => {
+    const rule = await create();
+    const res = await req(`/api/forwarding/rules/${rule.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: "pas-un-booleen" }),
+    });
+    const body = (await res.json()) as { error: { message: string } };
+    expect(res.status).toBe(400);
+    expect(body.error.message.startsWith("[{")).toBe(false);
+    expect(body.error.message).toContain("Requête invalide");
   });
 });
 
