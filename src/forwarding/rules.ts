@@ -81,3 +81,77 @@ export async function recordAttempts(
   if (statements.length === 0) return;
   await db.batch(statements);
 }
+
+type ForwardRuleRow = {
+  id: number;
+  match_local: string;
+  destination: string;
+  enabled: number;
+  created_at: number;
+  last_attempt_at: number | null;
+  last_status: "ok" | "error" | null;
+  last_error: string | null;
+};
+
+const toForwardRule = (row: ForwardRuleRow): ForwardRule => ({
+  id: row.id,
+  matchLocal: row.match_local,
+  destination: row.destination,
+  enabled: row.enabled === 1,
+  createdAt: row.created_at,
+  lastAttemptAt: row.last_attempt_at,
+  lastStatus: row.last_status,
+  lastError: row.last_error,
+});
+
+const SELECT_COLUMNS =
+  "id, match_local, destination, enabled, created_at, last_attempt_at, last_status, last_error";
+
+export async function listForwardRules(db: D1Database): Promise<ForwardRule[]> {
+  // Les catch-all d'abord, puis l'ordre alphabétique : l'interface liste ainsi la
+  // règle la plus large en tête, ce qui reflète la sémantique cumulative.
+  const { results } = await db
+    .prepare(
+      `SELECT ${SELECT_COLUMNS} FROM forward_rules
+        ORDER BY (match_local = '*') DESC, match_local, destination`
+    )
+    .all<ForwardRuleRow>();
+  return results.map(toForwardRule);
+}
+
+export async function createForwardRule(
+  db: D1Database,
+  input: { matchLocal: string; destination: string },
+  now: number,
+): Promise<ForwardRule | null> {
+  // On s'appuie sur l'index unique plutôt que sur un SELECT préalable : deux
+  // requêtes concurrentes passeraient toutes les deux la vérification, l'index
+  // est la seule garantie réelle.
+  const row = await db
+    .prepare(
+      `INSERT INTO forward_rules (match_local, destination, enabled, created_at)
+       VALUES (?, ?, 1, ?)
+       ON CONFLICT (match_local, destination) DO NOTHING
+       RETURNING ${SELECT_COLUMNS}`
+    )
+    .bind(input.matchLocal, input.destination, now)
+    .first<ForwardRuleRow>();
+  return row ? toForwardRule(row) : null;
+}
+
+export async function setForwardRuleEnabled(
+  db: D1Database,
+  id: number,
+  enabled: boolean,
+): Promise<boolean> {
+  const { meta } = await db
+    .prepare("UPDATE forward_rules SET enabled = ? WHERE id = ?")
+    .bind(enabled ? 1 : 0, id)
+    .run();
+  return meta.changes > 0;
+}
+
+export async function deleteForwardRule(db: D1Database, id: number): Promise<boolean> {
+  const { meta } = await db.prepare("DELETE FROM forward_rules WHERE id = ?").bind(id).run();
+  return meta.changes > 0;
+}

@@ -1,6 +1,15 @@
 import { env, applyD1Migrations } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { CATCH_ALL, localPart, matchingDestinations, recordAttempts } from "../../src/forwarding/rules";
+import {
+  CATCH_ALL,
+  createForwardRule,
+  deleteForwardRule,
+  listForwardRules,
+  localPart,
+  matchingDestinations,
+  recordAttempts,
+  setForwardRuleEnabled,
+} from "../../src/forwarding/rules";
 
 interface TestEnv {
   DB: D1Database;
@@ -132,5 +141,66 @@ describe("recordAttempts", () => {
 
   it("ne fait rien sur une liste vide", async () => {
     await expect(recordAttempts(env.DB, [], 1)).resolves.toBeUndefined();
+  });
+});
+
+describe("CRUD des règles", () => {
+  it("crée une règle et la relit", async () => {
+    const created = await createForwardRule(
+      env.DB,
+      { matchLocal: "contact", destination: "a@exemple.com" },
+      1700000000000,
+    );
+    expect(created).toMatchObject({
+      matchLocal: "contact",
+      destination: "a@exemple.com",
+      enabled: true,
+      createdAt: 1700000000000,
+      lastStatus: null,
+    });
+    expect(await listForwardRules(env.DB)).toHaveLength(1);
+  });
+
+  it("renvoie null sur un couple (source, destination) déjà présent", async () => {
+    await createForwardRule(env.DB, { matchLocal: "contact", destination: "a@exemple.com" }, 1);
+    const again = await createForwardRule(
+      env.DB,
+      { matchLocal: "contact", destination: "a@exemple.com" },
+      2,
+    );
+    expect(again).toBeNull();
+    expect(await listForwardRules(env.DB)).toHaveLength(1);
+  });
+
+  it("autorise deux règles catch-all vers des destinations différentes", async () => {
+    await createForwardRule(env.DB, { matchLocal: CATCH_ALL, destination: "a@exemple.com" }, 1);
+    await createForwardRule(env.DB, { matchLocal: CATCH_ALL, destination: "b@exemple.com" }, 2);
+    expect(await listForwardRules(env.DB)).toHaveLength(2);
+  });
+
+  it("refuse une seconde règle catch-all identique", async () => {
+    await createForwardRule(env.DB, { matchLocal: CATCH_ALL, destination: "a@exemple.com" }, 1);
+    expect(
+      await createForwardRule(env.DB, { matchLocal: CATCH_ALL, destination: "a@exemple.com" }, 2)
+    ).toBeNull();
+  });
+
+  it("désactive puis réactive une règle", async () => {
+    const rule = await createForwardRule(env.DB, { matchLocal: "contact", destination: "a@exemple.com" }, 1);
+    expect(await setForwardRuleEnabled(env.DB, rule!.id, false)).toBe(true);
+    expect((await listForwardRules(env.DB))[0].enabled).toBe(false);
+    await setForwardRuleEnabled(env.DB, rule!.id, true);
+    expect((await listForwardRules(env.DB))[0].enabled).toBe(true);
+  });
+
+  it("supprime une règle", async () => {
+    const rule = await createForwardRule(env.DB, { matchLocal: "contact", destination: "a@exemple.com" }, 1);
+    expect(await deleteForwardRule(env.DB, rule!.id)).toBe(true);
+    expect(await listForwardRules(env.DB)).toEqual([]);
+  });
+
+  it("signale l'absence sur un identifiant inconnu", async () => {
+    expect(await setForwardRuleEnabled(env.DB, 999, false)).toBe(false);
+    expect(await deleteForwardRule(env.DB, 999)).toBe(false);
   });
 });
