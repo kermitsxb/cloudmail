@@ -1,6 +1,6 @@
 import { env, applyD1Migrations } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleEmail, reparse } from "../src/email";
+import { FORWARD_TIMEOUT_MS, handleEmail, reparse } from "../src/email";
 
 interface TestEnv {
   TEST_FIXTURES: Record<string, string>;
@@ -188,6 +188,32 @@ describe("handleEmail — redirections", () => {
     await expect(handleEmail(msg, brokenR2)).resolves.toBeUndefined();
     expect(msg.forward).toHaveBeenCalledWith("gmail@exemple.com");
     expect(msg.setReject).not.toHaveBeenCalled();
+  });
+
+  it("archive le message même si le forward ne rend jamais la main", async () => {
+    await addRule("thomas", "gmail@exemple.com");
+    const msg = fakeMessage("simple.eml");
+    // Une promesse jamais résolue : le cas qu'aucun try/catch ne rattrape, et
+    // qui sans borne de temps consommerait tout le budget du handler avant la
+    // moindre écriture durable.
+    (msg.forward as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
+
+    vi.useFakeTimers();
+    const done = handleEmail(msg, env);
+    await vi.advanceTimersByTimeAsync(FORWARD_TIMEOUT_MS + 1);
+    // On rend la main aux vrais timers avant d'attendre la fin : la suite du
+    // handler passe par D1 et R2, dont les I/O ne doivent pas dépendre d'une
+    // horloge figée.
+    vi.useRealTimers();
+    await expect(done).resolves.toBeUndefined();
+
+    expect(await countMessages()).toBe(1);
+    expect(msg.setReject).not.toHaveBeenCalled();
+    const rule = await env.DB.prepare(
+      "SELECT last_status, last_error FROM forward_rules LIMIT 1"
+    ).first<{ last_status: string; last_error: string }>();
+    expect(rule?.last_status).toBe("error");
+    expect(rule?.last_error).toMatch(/délai dépassé/i);
   });
 
   it("forwarde avant de consommer message.raw", async () => {

@@ -3,6 +3,47 @@ import { parseEmail } from "./ingest/parse";
 import { storeIncoming } from "./ingest/store";
 import { matchingDestinations, recordAttempts, type AttemptResult } from "./forwarding/rules";
 
+// Borne de temps d'un appel à `message.forward()`. Elle n'existe pas pour la
+// performance mais pour l'invariant le plus fort du projet : « aucun message
+// reçu n'est perdu ». Le forward précède la seule écriture durable du message
+// (R2 puis D1), parce que `message.raw` est un flux à usage unique. Les
+// try/catch rendent la branche étanche aux exceptions, mais pas à un forward qui
+// ne rend jamais la main : sans borne, il consommerait tout le temps alloué au
+// handler et le message finirait sans objet R2 ni ligne D1 — pire que n'importe
+// quel échec de redirection.
+//
+// Dix secondes : un forward Email Routing qui aboutit répond en une fraction de
+// seconde, donc cette valeur ne peut pas couper une tentative saine. Elle reste
+// assez basse pour qu'une ou deux destinations bloquées laissent au handler de
+// quoi archiver, dans un budget d'exécution de l'ordre de la trentaine de
+// secondes.
+export const FORWARD_TIMEOUT_MS = 10_000;
+
+// `message.forward()` borné dans le temps. Le dépassement est converti en
+// exception, donc traité par l'appelant exactement comme un refus de
+// destination : statut d'erreur sur la règle, log, destination suivante.
+async function forwardWithTimeout(
+  message: ForwardableEmailMessage,
+  destination: string,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      message.forward(destination),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Délai dépassé (${FORWARD_TIMEOUT_MS} ms) : la redirection n'a pas abouti`)),
+          FORWARD_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    // Sans cette annulation, un forward rapide laisserait derrière lui un timer
+    // en vol qui retiendrait le handler jusqu'à son échéance.
+    clearTimeout(timer);
+  }
+}
+
 // Applique les règles de redirection. Entièrement encapsulée dans son propre
 // try/catch : une redirection est un service rendu en plus de l'archivage, jamais
 // une condition de celui-ci. Un échec ici — D1 indisponible, destination
@@ -15,7 +56,7 @@ async function applyForwardRules(message: ForwardableEmailMessage, env: Env): Pr
     const results: AttemptResult[] = [];
     for (const match of matches) {
       try {
-        await message.forward(match.destination);
+        await forwardWithTimeout(message, match.destination);
         results.push({ ruleIds: match.ruleIds, status: "ok" });
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
