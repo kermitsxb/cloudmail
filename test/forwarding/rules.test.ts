@@ -1,6 +1,6 @@
 import { env, applyD1Migrations } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { CATCH_ALL, localPart, matchingDestinations } from "../../src/forwarding/rules";
+import { CATCH_ALL, localPart, matchingDestinations, recordAttempts } from "../../src/forwarding/rules";
 
 interface TestEnv {
   DB: D1Database;
@@ -84,5 +84,53 @@ describe("matchingDestinations", () => {
     await addRule("thomas", "b@exemple.com");
     const matches = await matchingDestinations(env.DB, "adresse-cassee");
     expect(matches.map((m) => m.destination)).toEqual(["a@exemple.com"]);
+  });
+});
+
+describe("recordAttempts", () => {
+  const readRule = (id: number) =>
+    env.DB.prepare(
+      "SELECT last_attempt_at, last_status, last_error FROM forward_rules WHERE id = ?"
+    ).bind(id).first<{ last_attempt_at: number; last_status: string; last_error: string | null }>();
+
+  it("marque une règle servie avec succès", async () => {
+    const { meta } = await addRule("thomas", "a@exemple.com");
+    const id = meta.last_row_id;
+    await recordAttempts(env.DB, [{ ruleIds: [id], status: "ok" }], 1700000000000);
+    expect(await readRule(id)).toMatchObject({
+      last_attempt_at: 1700000000000,
+      last_status: "ok",
+      last_error: null,
+    });
+  });
+
+  it("enregistre l'erreur sur toutes les règles d'une destination en échec", async () => {
+    const a = (await addRule(CATCH_ALL, "x@exemple.com")).meta.last_row_id;
+    const b = (await addRule("thomas", "x@exemple.com")).meta.last_row_id;
+    await recordAttempts(
+      env.DB,
+      [{ ruleIds: [a, b], status: "error", error: "destination non vérifiée" }],
+      42,
+    );
+    expect(await readRule(a)).toMatchObject({ last_status: "error", last_error: "destination non vérifiée" });
+    expect(await readRule(b)).toMatchObject({ last_status: "error", last_error: "destination non vérifiée" });
+  });
+
+  it("efface l'erreur précédente quand la tentative réussit", async () => {
+    const id = (await addRule("thomas", "a@exemple.com")).meta.last_row_id;
+    await recordAttempts(env.DB, [{ ruleIds: [id], status: "error", error: "boom" }], 1);
+    await recordAttempts(env.DB, [{ ruleIds: [id], status: "ok" }], 2);
+    expect(await readRule(id)).toMatchObject({ last_status: "ok", last_error: null });
+  });
+
+  it("tronque un message d'erreur trop long", async () => {
+    const id = (await addRule("thomas", "a@exemple.com")).meta.last_row_id;
+    await recordAttempts(env.DB, [{ ruleIds: [id], status: "error", error: "x".repeat(900) }], 1);
+    const row = await readRule(id);
+    expect(row?.last_error).toHaveLength(500);
+  });
+
+  it("ne fait rien sur une liste vide", async () => {
+    await expect(recordAttempts(env.DB, [], 1)).resolves.toBeUndefined();
   });
 });
