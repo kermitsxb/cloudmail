@@ -63,7 +63,7 @@ describe("useThreads", () => {
 
 describe("hooks de redirection", () => {
   it("useForwardRules lit /api/forwarding/rules", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn(async (_url: string, _init: RequestInit) =>
       new Response(JSON.stringify([
         {
           id: 1, matchLocal: "*", destination: "a@exemple.com", enabled: true,
@@ -80,7 +80,7 @@ describe("hooks de redirection", () => {
   });
 
   it("useCreateForwardRule poste la règle", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn(async (_url: string, _init: RequestInit) =>
       new Response(JSON.stringify({ id: 1 }), {
         status: 201, headers: { "content-type": "application/json" },
       })
@@ -91,7 +91,7 @@ describe("hooks de redirection", () => {
     result.current.mutate({ matchLocal: "contact", destination: "a@exemple.com" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe("/api/forwarding/rules");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({
@@ -101,7 +101,7 @@ describe("hooks de redirection", () => {
   });
 
   it("useDeleteForwardRule appelle DELETE sur l'identifiant", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn(async (_url: string, _init: RequestInit) =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200, headers: { "content-type": "application/json" },
       })
@@ -111,7 +111,7 @@ describe("hooks de redirection", () => {
     const { result } = renderHook(() => useDeleteForwardRule(), { wrapper });
     result.current.mutate(7);
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe("/api/forwarding/rules/7");
     expect(init.method).toBe("DELETE");
   });
