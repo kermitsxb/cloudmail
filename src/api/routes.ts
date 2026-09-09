@@ -108,7 +108,7 @@ api.post("/messages", async (c) => {
   // Le message n'est stocké en "sent" qu'ici, après confirmation de l'envoi : un envoi en
   // échec (branche catch ci-dessus, ou le refus 413/400 plus haut) ne laisse aucune trace en
   // base.
-  const messageId = `<${crypto.randomUUID()}@example.com>`;
+  const messageId = `<${crypto.randomUUID()}@${c.env.MAIL_DOMAIN}>`;
   const id = await storeOutgoing(c.env, req, messageId);
   return c.json({ id, ...result });
 });

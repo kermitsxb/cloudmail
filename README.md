@@ -1,7 +1,8 @@
 # Cloudmail
 
-Client webmail personnel pour `thomas@example.com`, exécuté entièrement sur un
-Worker Cloudflare unique.
+Client webmail personnel, exécuté entièrement sur un Worker Cloudflare unique.
+Chaque installation le configure avec son propre domaine et ses propres
+identités d'envoi (voir « Mise en service » ci-dessous).
 
 ## Architecture
 
@@ -20,12 +21,16 @@ valide (sauf en développement local, voir plus bas).
 
 ## Prérequis Cloudflare
 
-- Le domaine `example.com` doit être géré sur Cloudflare (zone DNS active).
+- Un domaine à vous (ex. `example.com`) doit être géré sur Cloudflare (zone DNS
+  active). Les instructions ci-dessous utilisent `example.com` et le
+  sous-domaine `mail.example.com` comme placeholders : remplacez-les par votre
+  propre domaine partout où ils apparaissent (`wrangler.jsonc`, tableau de bord
+  Cloudflare).
 - Un plan **Workers Paid** est nécessaire pour utiliser Email Sending (l'API
   d'envoi utilisée par `src/send/client.ts`). Email Routing, utilisé pour la
   réception, est gratuit et ne nécessite pas ce plan.
 - Cloudflare Access (Zero Trust) doit être disponible sur le compte pour protéger
-  `mail.example.com`.
+  le sous-domaine choisi (`mail.example.com` dans les instructions).
 
 ## Commandes de développement
 
@@ -111,8 +116,11 @@ table » — y compris celles du handler `email()`, dont l'échec est silencieux
 
 ```bash
 pnpm wrangler d1 execute cloudmail --remote --command \
-  "INSERT INTO identities (address, display_name, is_default) VALUES ('thomas@example.com', 'Thomas Stocker', 1)"
+  "INSERT INTO identities (address, display_name, is_default) VALUES ('vous@example.com', 'Votre Nom', 1)"
 ```
+
+Remplacer `vous@example.com` et `Votre Nom` par l'adresse d'envoi et le nom
+affiché souhaités, sur votre propre domaine.
 
 Cette étape crée l'identité d'envoi par défaut ; elle a besoin des tables de
 l'étape 2. Sans ligne dans `identities`, l'API n'a aucune adresse `From` à
@@ -142,11 +150,15 @@ déploiement final de l'étape 10. Sa base, elle, est déjà migrée et peuplée
 
 ### 5. Vérifier le domaine dans Email Service
 
-Tableau de bord Cloudflare → Email → Email Service → Sending → ajouter
-`example.com` et publier les enregistrements DNS demandés (SPF/DKIM). Attendre
-le statut « verified ».
+Tableau de bord Cloudflare → Email → Email Service → Sending → ajouter votre
+domaine (`example.com`) et publier les enregistrements DNS demandés
+(SPF/DKIM). Attendre le statut « verified ».
 
-Cette étape produit l'autorisation d'envoyer des emails depuis `example.com`
+Reporter ce même domaine dans `wrangler.jsonc`, section `vars` →
+`MAIL_DOMAIN` (utilisé pour générer le `Message-ID` des emails envoyés, voir
+`src/api/routes.ts`).
+
+Cette étape produit l'autorisation d'envoyer des emails depuis votre domaine
 via l'API Cloudflare Email Sending. Si elle est oubliée ou incomplète, tout
 envoi via `src/send/client.ts` échoue (l'API Cloudflare rejette les messages
 provenant d'un domaine non vérifié).
@@ -158,7 +170,7 @@ règle catch-all « Send to a Worker » pointant sur le Worker `cloudmail` (visi
 dans la liste grâce au déploiement de l'étape 4).
 
 Cette étape produit le déclenchement du handler `email()` (`src/email.ts`) pour
-tout message reçu sur `*@example.com`. Si elle est oubliée, aucun message
+tout message reçu sur `*@votre-domaine`. Si elle est oubliée, aucun message
 entrant n'atteint jamais Cloudmail : Cloudflare les rejette ou les jette selon
 la configuration DNS MX en place.
 
@@ -169,16 +181,18 @@ C'est la raison de la position de cette étape dans la séquence.
 
 ### 7. Créer l'application Cloudflare Access
 
-Zero Trust → Access → Applications → Self-hosted, domaine `mail.example.com`,
-politique « Emails » limitée à `vous@example.com`. Copier ensuite
-l'Application Audience (AUD) et le team domain dans `wrangler.jsonc`, section
-`vars` :
+Zero Trust → Access → Applications → Self-hosted, domaine `mail.example.com`
+(le sous-domaine choisi à l'étape « Prérequis Cloudflare »), politique
+« Emails » limitée à votre propre adresse (celle avec laquelle vous vous
+connecterez). Copier ensuite l'Application Audience (AUD) et le team domain
+dans `wrangler.jsonc`, section `vars` :
 
 ```jsonc
 "vars": {
   "ACCESS_TEAM_DOMAIN": "<team>.cloudflareaccess.com",
   "ACCESS_AUD": "<AUD copié depuis l'application Access>",
-  "ALLOWED_EMAILS": "vous@example.com"
+  "ALLOWED_EMAILS": "vous@example.com",
+  "MAIL_DOMAIN": "example.com"
 }
 ```
 

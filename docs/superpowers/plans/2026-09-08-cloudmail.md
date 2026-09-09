@@ -458,7 +458,7 @@ Créer six fichiers dans `test/fixtures/` avec ce contenu exact (les `.eml` util
 simple.eml
 ---
 From: Zoé Martin <zoe@example.com>
-To: thomas@example.com
+To: vous@example.com
 Subject: =?utf-8?B?RmFjdHVyZSByw6lnbMOpZQ==?=
 Message-ID: <simple-1@example.com>
 Date: Mon, 08 Sep 2026 10:00:00 +0200
@@ -471,7 +471,7 @@ Bonjour, la facture est réglée.
 multipart.eml
 ---
 From: bot@example.com
-To: thomas@example.com, autre@example.com
+To: vous@example.com, autre@example.com
 Cc: chef@example.com
 Subject: Rapport
 Message-ID: <multi-1@example.com>
@@ -493,7 +493,7 @@ Content-Type: text/html; charset=utf-8
 attachment.eml
 ---
 From: a@example.com
-To: thomas@example.com
+To: vous@example.com
 Subject: Avec PJ
 Message-ID: <att-1@example.com>
 Date: Mon, 08 Sep 2026 12:00:00 +0200
@@ -516,7 +516,7 @@ YSxiLGMKMSwyLDMK
 inline-image.eml
 ---
 From: a@example.com
-To: thomas@example.com
+To: vous@example.com
 Subject: Image inline
 Message-ID: <inline-1@example.com>
 Date: Mon, 08 Sep 2026 13:00:00 +0200
@@ -540,7 +540,7 @@ iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAA
 latin1.eml
 ---
 From: a@example.com
-To: thomas@example.com
+To: vous@example.com
 Subject: =?ISO-8859-1?Q?R=E9union?=
 Message-ID: <latin1-1@example.com>
 Date: Mon, 08 Sep 2026 14:00:00 +0200
@@ -580,7 +580,7 @@ describe("parseEmail", () => {
 
   it("extrait les destinataires multiples et le HTML", async () => {
     const m = await parseEmail(await load("multipart.eml"), "bot@example.com");
-    expect(m.to.map((a) => a.address)).toEqual(["thomas@example.com", "autre@example.com"]);
+    expect(m.to.map((a) => a.address)).toEqual(["vous@example.com", "autre@example.com"]);
     expect(m.cc.map((a) => a.address)).toEqual(["chef@example.com"]);
     expect(m.html).toContain("<b>HTML</b>");
     expect(m.text).toContain("Version texte");
@@ -818,7 +818,7 @@ beforeEach(async () => {
 const msg = (over: Partial<ParsedMessage>): ParsedMessage => ({
   messageId: "<m1@x>", inReplyTo: null, references: [],
   from: { address: "zoe@example.com", name: null },
-  to: [{ address: "thomas@example.com", name: null }],
+  to: [{ address: "vous@example.com", name: null }],
   cc: [], replyTo: [], subject: "Facture", text: "", html: null,
   date: 1757318400, attachments: [], parseError: false, ...over,
 });
@@ -833,7 +833,7 @@ const seed = async (messageId: string, subject: string, threadId: number, at = 1
   ).bind(threadId, messageId, subject, at).run();
   await env.DB.prepare(
     `INSERT INTO recipients (message_id, kind, address)
-     VALUES ((SELECT id FROM messages WHERE message_id = ?), 'to', 'thomas@example.com')`
+     VALUES ((SELECT id FROM messages WHERE message_id = ?), 'to', 'vous@example.com')`
   ).bind(messageId).run();
 };
 
@@ -1019,7 +1019,7 @@ const load = async (name: string): Promise<ArrayBuffer> => {
   return new TextEncoder().encode(mod.default).buffer;
 };
 
-const envelope = { from: "zoe@example.com", to: "thomas@example.com" };
+const envelope = { from: "zoe@example.com", to: "vous@example.com" };
 
 describe("storeIncoming", () => {
   it("écrit le MIME brut dans R2 et le message dans D1", async () => {
@@ -1053,7 +1053,7 @@ describe("storeIncoming", () => {
     expect(rows.results).toEqual([
       { kind: "cc", address: "chef@example.com" },
       { kind: "to", address: "autre@example.com" },
-      { kind: "to", address: "thomas@example.com" },
+      { kind: "to", address: "vous@example.com" },
     ]);
   });
 
@@ -1268,7 +1268,7 @@ const fakeMessage = async (fixture: string) => {
   const bytes = new TextEncoder().encode(mod.default);
   return {
     from: "zoe@example.com",
-    to: "thomas@example.com",
+    to: "vous@example.com",
     rawSize: bytes.byteLength,
     raw: new Response(bytes).body!,
     headers: new Headers(),
@@ -1683,12 +1683,12 @@ describe("getThread", () => {
   it("retourne les messages avec destinataires et pièces jointes", async () => {
     await insertThread(1, "facture", 100);
     await insertMessage(1, 1, { subject: "Facture" });
-    await env.DB.prepare("INSERT INTO recipients (message_id, kind, address, name) VALUES (1, 'to', 'thomas@example.com', 'Thomas')").run();
+    await env.DB.prepare("INSERT INTO recipients (message_id, kind, address, name) VALUES (1, 'to', 'vous@example.com', 'Thomas')").run();
     await env.DB.prepare("INSERT INTO attachments (id, message_id, filename, mime_type, size, r2_key) VALUES (1, 1, 'f.pdf', 'application/pdf', 42, 'att/x/0-f.pdf')").run();
 
     const t = await getThread(env.DB, 1);
     expect(t?.subject).toBe("Facture");
-    expect(t?.messages[0].to).toEqual([{ address: "thomas@example.com", name: "Thomas" }]);
+    expect(t?.messages[0].to).toEqual([{ address: "vous@example.com", name: "Thomas" }]);
     expect(t?.messages[0].attachments).toEqual([{ id: 1, filename: "f.pdf", mimeType: "application/pdf", size: 42 }]);
   });
 
@@ -2544,7 +2544,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { sendEmail, payloadSize, SendError, type SendRequest } from "../../src/send/client";
 
 const base: SendRequest = {
-  from: "thomas@example.com",
+  from: "vous@example.com",
   to: ["zoe@example.com"],
   subject: "Bonjour",
   text: "Salut",
@@ -2566,7 +2566,7 @@ describe("sendEmail", () => {
     expect(calls[0].url).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/email/sending/send");
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
     expect(JSON.parse(calls[0].init.body as string)).toMatchObject({
-      from: "thomas@example.com",
+      from: "vous@example.com",
       to: ["zoe@example.com"],
       subject: "Bonjour",
       text: "Salut",
@@ -2741,7 +2741,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM identities"),
   ]);
   await env.DB.prepare(
-    "INSERT INTO identities (address, display_name, is_default) VALUES ('thomas@example.com', 'Thomas', 1)"
+    "INSERT INTO identities (address, display_name, is_default) VALUES ('vous@example.com', 'Thomas', 1)"
   ).run();
 });
 
@@ -2760,7 +2760,7 @@ const post = (body: unknown) =>
   );
 
 const valid = {
-  from: "thomas@example.com",
+  from: "vous@example.com",
   to: ["zoe@example.com"],
   subject: "Bonjour",
   text: "Salut",
@@ -2776,7 +2776,7 @@ describe("POST /api/messages", () => {
       "SELECT direction, folder, from_addr, subject, is_read FROM messages"
     ).first<Record<string, unknown>>();
     expect(m).toMatchObject({
-      direction: "out", folder: "sent", from_addr: "thomas@example.com", subject: "Bonjour", is_read: 1,
+      direction: "out", folder: "sent", from_addr: "vous@example.com", subject: "Bonjour", is_read: 1,
     });
   });
 
@@ -3404,7 +3404,7 @@ const wrap = (ui: React.ReactElement) => {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 };
 
-const identities = [{ address: "thomas@example.com", displayName: "Thomas", isDefault: true }];
+const identities = [{ address: "vous@example.com", displayName: "Thomas", isDefault: true }];
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -3424,7 +3424,7 @@ describe("Composer", () => {
     await waitFor(() => {
       const body = JSON.parse((vi.mocked(fetch).mock.calls.at(-1)![1] as RequestInit).body as string);
       expect(body).toMatchObject({
-        from: "thomas@example.com", to: ["zoe@example.com"], subject: "Bonjour", text: "Salut",
+        from: "vous@example.com", to: ["zoe@example.com"], subject: "Bonjour", text: "Salut",
       });
     });
   });
@@ -3552,7 +3552,7 @@ Zero Trust → Access → Applications → Self-hosted, domaine `mail.example.co
 
 ```bash
 pnpm wrangler d1 execute cloudmail --remote --command \
-  "INSERT INTO identities (address, display_name, is_default) VALUES ('thomas@example.com', 'Thomas Stocker', 1)"
+  "INSERT INTO identities (address, display_name, is_default) VALUES ('vous@example.com', 'Thomas Stocker', 1)"
 ```
 
 - [ ] **Step 7: Déployer**
@@ -3564,7 +3564,7 @@ pnpm deploy
 - [ ] **Step 8: Vérifier de bout en bout**
 
 1. Ouvrir `https://mail.example.com` → l'écran de connexion Access s'affiche, puis le webmail.
-2. Depuis une adresse externe, envoyer un email à `thomas@example.com` → il apparaît dans la boîte de réception en moins d'une minute.
+2. Depuis une adresse externe, envoyer un email à `vous@example.com` → il apparaît dans la boîte de réception en moins d'une minute.
 3. Ouvrir le message, vérifier l'affichage du corps et le blocage des images distantes.
 4. Répondre → l'email arrive côté destinataire, et la réponse s'affiche dans le même thread.
 5. Envoyer un email avec pièce jointe dans les deux sens et vérifier le téléchargement.
