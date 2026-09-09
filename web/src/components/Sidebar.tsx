@@ -13,9 +13,13 @@ const FOLDERS: { id: string; label: string }[] = [
 export function Sidebar({
   folder,
   onSelectFolder,
+  view,
+  onSelectView,
 }: {
   folder: string;
   onSelectFolder: (folder: string) => void;
+  view: "mail" | "forwarding";
+  onSelectView: (view: "mail" | "forwarding") => void;
 }) {
   const { data: identities } = useIdentities();
   const [composerOpen, setComposerOpen] = useState(false);
@@ -37,14 +41,27 @@ export function Sidebar({
           <li key={f.id}>
             <button
               type="button"
-              aria-current={f.id === folder ? "true" : undefined}
-              onClick={() => onSelectFolder(f.id)}
+              aria-current={view === "mail" && f.id === folder ? "true" : undefined}
+              onClick={() => { onSelectView("mail"); onSelectFolder(f.id); }}
               className="w-full rounded px-3 py-2 text-left text-sm hover:bg-accent aria-[current=true]:bg-accent aria-[current=true]:font-semibold"
             >
               {f.label}
             </button>
           </li>
         ))}
+      </ul>
+
+      <ul className="flex flex-col gap-1">
+        <li>
+          <button
+            type="button"
+            aria-current={view === "forwarding" ? "true" : undefined}
+            onClick={() => onSelectView("forwarding")}
+            className="w-full rounded px-3 py-2 text-left text-sm hover:bg-accent aria-[current=true]:bg-accent aria-[current=true]:font-semibold"
+          >
+            Redirections
+          </button>
+        </li>
       </ul>
 
       {identities && identities.length > 0 && (
