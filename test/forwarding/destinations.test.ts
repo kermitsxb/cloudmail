@@ -53,4 +53,22 @@ describe("listVerifiedDestinations", () => {
       RoutingUnavailableError
     );
   });
+
+  it("lève RoutingUnavailableError quand l'API répond succès=false avec un statut 200", async () => {
+    vi.stubGlobal("fetch", async () =>
+      Response.json({ success: false, errors: [{ message: "nope" }] }, { status: 200 })
+    );
+    await expect(listVerifiedDestinations(withRouting())).rejects.toBeInstanceOf(
+      RoutingUnavailableError
+    );
+  });
+
+  it("lève RoutingUnavailableError quand fetch rejette (panne réseau)", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("network down");
+    });
+    await expect(listVerifiedDestinations(withRouting())).rejects.toBeInstanceOf(
+      RoutingUnavailableError
+    );
+  });
 });
