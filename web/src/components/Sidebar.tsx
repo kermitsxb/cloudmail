@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useIdentities } from "../api/client";
 import { Composer } from "./Composer";
+import { ComposerPanel } from "./ComposerPanel";
 import { Button } from "./ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 const FOLDERS: { id: string; label: string }[] = [
   { id: "inbox", label: "Boîte de réception" },
@@ -26,14 +26,11 @@ export function Sidebar({
         Nouveau message
       </Button>
 
-      <Dialog open={composerOpen} onOpenChange={setComposerOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Nouveau message</DialogTitle>
-          </DialogHeader>
+      {composerOpen && (
+        <ComposerPanel title="Nouveau message" onClose={() => setComposerOpen(false)}>
           <Composer mode="new" onClose={() => setComposerOpen(false)} />
-        </DialogContent>
-      </Dialog>
+        </ComposerPanel>
+      )}
 
       <ul className="flex flex-col gap-1">
         {FOLDERS.map((f) => (
