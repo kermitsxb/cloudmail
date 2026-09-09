@@ -9,7 +9,7 @@ const wrap = (ui: React.ReactElement) => {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 };
 
-const identities = [{ address: "thomas@planigramme.fr", displayName: "Thomas", isDefault: true }];
+const identities = [{ address: "thomas@example.com", displayName: "Thomas", isDefault: true }];
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (url: string, _init?: RequestInit) => {
@@ -29,7 +29,7 @@ describe("Composer", () => {
     await waitFor(() => {
       const body = JSON.parse((vi.mocked(fetch).mock.calls.at(-1)![1] as RequestInit).body as string);
       expect(body).toMatchObject({
-        from: "thomas@planigramme.fr", to: ["zoe@example.com"], subject: "Bonjour", text: "Salut",
+        from: "thomas@example.com", to: ["zoe@example.com"], subject: "Bonjour", text: "Salut",
       });
     });
   });

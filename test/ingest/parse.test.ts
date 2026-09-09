@@ -29,7 +29,7 @@ describe("parseEmail", () => {
 
   it("extrait les destinataires multiples et le HTML", async () => {
     const m = await parseEmail(await load("multipart.eml"), "bot@example.com");
-    expect(m.to.map((a) => a.address)).toEqual(["thomas@planigramme.fr", "autre@planigramme.fr"]);
+    expect(m.to.map((a) => a.address)).toEqual(["thomas@example.com", "autre@example.com"]);
     expect(m.cc.map((a) => a.address)).toEqual(["chef@example.com"]);
     expect(m.html).toContain("<b>HTML</b>");
     expect(m.text).toContain("Version texte");

@@ -5,7 +5,7 @@
 ## 1. Objectif
 
 Un client webmail personnel permettant de lire et d'envoyer des emails sur les
-adresses du domaine `planigramme.fr`, entièrement hébergé sur Cloudflare.
+adresses du domaine `example.com`, entièrement hébergé sur Cloudflare.
 
 Usage : mono-utilisateur, plusieurs adresses/alias sur un domaine, vue unifiée,
 choix de l'expéditeur à l'envoi.
@@ -24,7 +24,7 @@ Cloudflare Email Service se compose de deux briques distinctes :
 des messages est donc à notre charge : D1 pour les métadonnées et le corps,
 R2 pour le MIME brut et les pièces jointes.
 
-Prérequis déjà en place : `planigramme.fr` sur Cloudflare, plan Workers Paid.
+Prérequis déjà en place : `example.com` sur Cloudflare, plan Workers Paid.
 
 ## 2. Périmètre v1
 
@@ -39,7 +39,7 @@ multi-utilisateurs, multi-domaines, tests E2E.
 ## 3. Architecture
 
 Un **Worker unique** (`cloudmail`, TypeScript) déployé sur
-`mail.planigramme.fr`, avec trois entrées :
+`mail.example.com`, avec trois entrées :
 
 | Entrée | Rôle |
 |---|---|
@@ -53,7 +53,7 @@ Bindings : `DB` (D1), `MAIL` (R2). Secrets : `CF_ACCOUNT_ID`, `CF_API_TOKEN`
 
 ### 3.1 Flux entrant
 
-Email Routing est configuré en catch-all sur `planigramme.fr` vers le Worker.
+Email Routing est configuré en catch-all sur `example.com` vers le Worker.
 
 1. `message.raw` (stream consommable une seule fois) est bufferisé en
    `ArrayBuffer`.
@@ -86,7 +86,7 @@ destinataire.
 
 ### 3.3 Authentification
 
-Cloudflare Access protège `mail.planigramme.fr`. Le Worker vérifie le JWT
+Cloudflare Access protège `mail.example.com`. Le Worker vérifie le JWT
 `Cf-Access-Jwt-Assertion` contre le JWKS du team domain (mis en cache en
 mémoire, rafraîchi à l'expiration), valide `aud` et `exp`, et compare l'email
 du token à `ALLOWED_EMAILS`.
@@ -264,8 +264,8 @@ Migrations D1 versionnées dans `migrations/`. Secrets posés par
 
 Étapes manuelles, faites une fois et documentées dans le README :
 
-1. vérification de `planigramme.fr` dans Email Service (enregistrements DNS) ;
+1. vérification de `example.com` dans Email Service (enregistrements DNS) ;
 2. activation d'Email Routing et règle catch-all vers le Worker `cloudmail` ;
-3. création de l'application Cloudflare Access sur `mail.planigramme.fr` ;
+3. création de l'application Cloudflare Access sur `mail.example.com` ;
 4. création du token API limité à l'envoi d'emails ;
 5. peuplement de la table `identities`.

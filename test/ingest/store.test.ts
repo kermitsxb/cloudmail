@@ -31,7 +31,7 @@ const load = async (name: string): Promise<ArrayBuffer> => {
   return bytes.buffer;
 };
 
-const envelope = { from: "zoe@example.com", to: "thomas@planigramme.fr" };
+const envelope = { from: "zoe@example.com", to: "thomas@example.com" };
 
 describe("storeIncoming", () => {
   it("écrit le MIME brut dans R2 et le message dans D1", async () => {
@@ -63,8 +63,8 @@ describe("storeIncoming", () => {
     ).bind(res.messageId).all<{ kind: string; address: string }>();
     expect(rows.results).toEqual([
       { kind: "cc", address: "chef@example.com" },
-      { kind: "to", address: "autre@planigramme.fr" },
-      { kind: "to", address: "thomas@planigramme.fr" },
+      { kind: "to", address: "autre@example.com" },
+      { kind: "to", address: "thomas@example.com" },
     ]);
   });
 
@@ -127,7 +127,7 @@ describe("storeIncoming", () => {
     // une exception. C'est ce test qui atteste l'invariant réel : le brut est
     // dans R2 avant tout appel à parseEmail, quoi qu'il arrive ensuite.
     const raw = await load("malformed.eml");
-    const badEnvelope = { from: null as unknown as string, to: "thomas@planigramme.fr" };
+    const badEnvelope = { from: null as unknown as string, to: "thomas@example.com" };
     await expect(storeIncoming(env, raw, badEnvelope)).rejects.toThrow();
     const digest = await crypto.subtle.digest("SHA-256", raw);
     const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -142,7 +142,7 @@ describe("storeIncoming — garde de taille avant insertion D1", () => {
   // handleEmail avale l'erreur, et le message ne survivait que comme objet R2 sans ligne D1.
   const rawWithBody = (html: string, messageId: string): ArrayBuffer =>
     new TextEncoder().encode(
-      `Message-ID: ${messageId}\r\nFrom: zoe@example.com\r\nTo: thomas@planigramme.fr\r\n` +
+      `Message-ID: ${messageId}\r\nFrom: zoe@example.com\r\nTo: thomas@example.com\r\n` +
         `Subject: gros message\r\nContent-Type: text/html; charset=utf-8\r\n\r\n${html}`,
     ).buffer as ArrayBuffer;
 
