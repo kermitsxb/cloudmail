@@ -6,6 +6,14 @@ import { getThread, listIdentities, listThreads } from "../db/queries";
 import { moveToFolder, purgeMessage, setRead, storeOutgoing } from "../db/mutations";
 import { sanitizeHtml } from "../html/sanitize";
 import { MAX_PAYLOAD_BYTES, SendError, payloadSize, sendEmail, type SendRequest } from "../send/client";
+import {
+  CATCH_ALL,
+  createForwardRule,
+  deleteForwardRule,
+  listForwardRules,
+  setForwardRuleEnabled,
+} from "../forwarding/rules";
+import { RoutingUnavailableError, listVerifiedDestinations } from "../forwarding/destinations";
 
 export type ApiEnv = { Bindings: Env; Variables: { identity: AccessIdentity } };
 
@@ -40,6 +48,24 @@ const sendBody = z.object({
     contentBase64: z.string(),
   })).max(10).optional(),
 });
+
+// Partie locale d'une adresse, ou la sentinelle '*' pour « toutes les adresses ».
+// Le jeu de caractères est celui des adresses non citées du RFC 5322 : suffisant
+// pour tout ce qui s'écrit en pratique, et assez restreint pour qu'aucune valeur
+// acceptée ici ne puisse être confondue avec la sentinelle.
+const forwardRuleBody = z.object({
+  matchLocal: z
+    .string()
+    .trim()
+    .max(64)
+    .transform((v) => v.toLowerCase())
+    .refine((v) => v === CATCH_ALL || /^[a-z0-9._%+-]+$/.test(v), {
+      message: "Partie locale invalide",
+    }),
+  destination: z.string().email(),
+});
+
+const forwardRulePatchBody = z.object({ enabled: z.boolean() });
 
 export const api = new Hono<ApiEnv>();
 
@@ -284,4 +310,97 @@ api.get("/messages/:id/raw", async (c) => {
       "x-content-type-options": "nosniff",
     },
   });
+});
+
+api.get("/config", (c) => c.json({ mailDomain: c.env.MAIL_DOMAIN }));
+
+api.get("/forwarding/rules", async (c) => c.json(await listForwardRules(c.env.DB)));
+
+api.post("/forwarding/rules", async (c) => {
+  const parsed = forwardRuleBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: { code: "invalid_body", message: parsed.error.message } }, 400);
+  }
+
+  // La liste fermée côté interface est un confort, pas une garantie : on
+  // revalide ici, car une destination non vérifiée ferait échouer le forward
+  // silencieusement, longtemps après la création de la règle.
+  let destinations: string[];
+  try {
+    destinations = await listVerifiedDestinations(c.env);
+  } catch (err) {
+    if (err instanceof RoutingUnavailableError) {
+      return c.json({
+        error: {
+          code: "routing_unavailable",
+          message: "Impossible de lire les destinations vérifiées du compte Cloudflare",
+        },
+      }, 503);
+    }
+    throw err;
+  }
+
+  const destination = parsed.data.destination;
+  if (!destinations.some((d) => d.toLowerCase() === destination.toLowerCase())) {
+    return c.json({
+      error: {
+        code: "unverified_destination",
+        message: `${destination} n'est pas une destination vérifiée sur votre compte Cloudflare`,
+      },
+    }, 400);
+  }
+
+  const rule = await createForwardRule(c.env.DB, parsed.data, Date.now());
+  if (!rule) {
+    return c.json({
+      error: { code: "duplicate_rule", message: "Cette redirection existe déjà" },
+    }, 409);
+  }
+  return c.json(rule, 201);
+});
+
+api.patch("/forwarding/rules/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) {
+    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+  }
+  const parsed = forwardRulePatchBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: { code: "invalid_body", message: parsed.error.message } }, 400);
+  }
+  const found = await setForwardRuleEnabled(c.env.DB, id, parsed.data.enabled);
+  if (!found) {
+    return c.json({ error: { code: "not_found", message: "Redirection introuvable" } }, 404);
+  }
+  return c.json({ ok: true });
+});
+
+api.delete("/forwarding/rules/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) {
+    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+  }
+  const found = await deleteForwardRule(c.env.DB, id);
+  if (!found) {
+    return c.json({ error: { code: "not_found", message: "Redirection introuvable" } }, 404);
+  }
+  return c.json({ ok: true });
+});
+
+api.get("/forwarding/destinations", async (c) => {
+  try {
+    return c.json({ destinations: await listVerifiedDestinations(c.env) });
+  } catch (err) {
+    if (err instanceof RoutingUnavailableError) {
+      // 503 et non une liste vide : « je ne sais pas » ne doit pas se lire comme
+      // « le compte n'a aucune destination », l'interface les affiche différemment.
+      return c.json({
+        error: {
+          code: "routing_unavailable",
+          message: "Impossible de lire les destinations vérifiées du compte Cloudflare",
+        },
+      }, 503);
+    }
+    throw err;
+  }
 });
