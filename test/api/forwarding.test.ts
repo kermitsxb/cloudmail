@@ -82,10 +82,17 @@ describe("POST /api/forwarding/rules", () => {
 
   it("renvoie un message d'erreur français lisible, pas un dump JSON de zod", async () => {
     stubDestinations(["gmail@exemple.com"]);
-    const res = await postRule({ matchLocal: "a b@c", destination: "pas-un-email" });
+    const res = await postRule({ matchLocal: "contact", destination: "pas-un-email" });
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message.startsWith("[{")).toBe(false);
     expect(body.error.message).toContain("Requête invalide");
+  });
+
+  it("garde le message écrit à la main pour une partie locale invalide", async () => {
+    stubDestinations(["gmail@exemple.com"]);
+    const res = await postRule({ matchLocal: "a b", destination: "gmail@exemple.com" });
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toBe("Partie locale invalide");
   });
 
   it("refuse une destination non vérifiée", async () => {

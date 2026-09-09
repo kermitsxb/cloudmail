@@ -225,6 +225,16 @@ describe("routes /api/messages/:id", () => {
     expect(res.status).toBe(400);
   });
 
+  it("garde le message écrit à la main pour un corps vide", async () => {
+    const res = await app.request(
+      "https://example.com/api/messages/1",
+      { method: "PATCH", body: JSON.stringify({}), headers: { "Content-Type": "application/json" } },
+      { ...env, DEV_BYPASS_AUTH: "1" }
+    );
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toBe("Fournir isRead ou folder");
+  });
+
   it("répond 400 pour un identifiant non numérique via PATCH", async () => {
     const res = await app.request(
       "https://example.com/api/messages/abc",
