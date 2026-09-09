@@ -19,10 +19,19 @@ export async function listVerifiedDestinations(env: Env): Promise<string[]> {
     );
   }
 
-  const res = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/email/routing/addresses?per_page=50`,
-    { headers: { Authorization: `Bearer ${env.CF_ROUTING_TOKEN}` } }
-  );
+  // Toute panne réseau (DNS, connexion réinitialisée, rejet par le runtime
+  // Workers) doit se traduire par le même type d'erreur que les échecs
+  // applicatifs ci-dessous : l'appelant (une route API) ne filtre que sur
+  // RoutingUnavailableError pour répondre 503, jamais sur une exception brute.
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/email/routing/addresses?per_page=50`,
+      { headers: { Authorization: `Bearer ${env.CF_ROUTING_TOKEN}` } }
+    );
+  } catch {
+    throw new RoutingUnavailableError("API Cloudflare Email Routing : requête réseau échouée");
+  }
 
   const body = (await res.json().catch(() => null)) as
     | { success?: boolean; result?: AddressRow[] }
