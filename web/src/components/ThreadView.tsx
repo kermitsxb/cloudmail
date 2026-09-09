@@ -122,7 +122,7 @@ function MessageItem({
 }
 
 export function ThreadView({ threadId }: { threadId: number }) {
-  const { data: thread } = useThread(threadId);
+  const { data: thread, error, isLoading } = useThread(threadId);
   const [openId, setOpenId] = useState<number | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageDetail | null>(null);
   const updateMessage = useUpdateMessage();
@@ -151,7 +151,17 @@ export function ThreadView({ threadId }: { threadId: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread?.id]);
 
-  if (!thread) {
+  // Une requête en échec ne doit pas être indiscernable d'un chargement : sans cette
+  // branche, un 500 ou un 401 laisse le panneau sur « Chargement… » indéfiniment.
+  if (error) {
+    return (
+      <p role="alert" className="m-auto max-w-sm text-sm text-destructive">
+        Impossible d'ouvrir cette conversation : {error.message}
+      </p>
+    );
+  }
+
+  if (isLoading || !thread) {
     return <p className="m-auto text-sm text-muted-foreground">Chargement…</p>;
   }
 
