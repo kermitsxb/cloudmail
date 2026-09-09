@@ -19,6 +19,19 @@ stockés dans un bucket R2. Cloudflare Access se place devant l'ensemble de
 l'application : aucune requête n'atteint l'API ou le SPA sans un jeton Access
 valide (sauf en développement local, voir plus bas).
 
+Les redirections sont gérées depuis l'application, pas depuis le tableau de bord
+Cloudflare. Une règle de la table D1 `forward_rules` associe une adresse source
+— une partie locale, ou `*` pour toutes les adresses du domaine — à une
+destination vérifiée sur le compte Cloudflare. À la réception, `handleEmail`
+(`src/email.ts`) applique **toutes** les règles qui correspondent au
+destinataire, catch-all comprise, et dédoublonne les destinations identiques.
+Le forward précède l'archivage, parce que `message.raw` est un `ReadableStream`
+à usage unique ; les deux étapes sont isolées, si bien qu'un échec de
+redirection ne coûte jamais l'archivage. Cette séparation est ce qui permet
+qu'un message arrive à la fois dans Cloudmail et dans une boîte externe :
+Cloudflare Email Routing ne sait livrer qu'à un Worker **ou** à une adresse,
+jamais aux deux.
+
 ## Prérequis Cloudflare
 
 - Un domaine à vous (ex. `example.com`) doit être géré sur Cloudflare (zone DNS
@@ -182,6 +195,19 @@ elle exige donc que tout ce dont l'ingestion a besoin existe déjà — le Worke
 déployé (étape 4), le bucket R2 (étape 1) et surtout les tables D1 (étape 2).
 C'est la raison de la position de cette étape dans la séquence.
 
+**Attention aux règles littérales déjà en place.** Une règle Email Routing sur
+une adresse précise passe **avant** le catch-all : tant qu'elle existe, le
+Worker ne voit jamais cette adresse, et Cloudmail n'en archive rien. Si le
+domaine porte déjà des règles de forwarding (par exemple `contact@` vers une
+boîte Gmail), il faut les supprimer et recréer les redirections équivalentes
+depuis l'interface « Redirections » de Cloudmail — c'est le Worker qui reprend
+alors le forward, en plus de l'archivage.
+
+Recréer une redirection **catch-all** vers une boîte externe plutôt que des
+règles nominatives forwarde aussi tout le courrier adressé à des adresses
+inexistantes, que Cloudflare drope aujourd'hui. Le choix est laissé à
+l'utilisateur ; les règles nominatives sont recommandées.
+
 ### 7. Créer l'application Cloudflare Access
 
 Zero Trust → Access → Applications → Self-hosted, domaine `mail.example.com`
@@ -207,29 +233,37 @@ JWT échoue systématiquement et personne — pas même l'utilisateur légitime 
 peut se connecter. (Ces valeurs ne seront effectivement appliquées qu'au
 déploiement final, étape 10.)
 
-### 8. Créer un token API restreint à l'envoi d'emails
+### 8. Créer les tokens API
 
-Tableau de bord Cloudflare → créer un token API avec la seule permission
-« Email Sending: Send » (aucune autre permission — ce token ne doit pas pouvoir
-gérer le compte, les zones DNS, D1 ou R2).
+Deux tokens distincts, chacun avec une seule permission :
 
-Cette étape produit le jeton utilisé par `src/send/client.ts` pour appeler
-`POST /accounts/{account_id}/email/sending/send`. Un token trop permissif serait
-un risque inutile en cas de fuite ; un token absent ou mal scopé fait échouer
-tout envoi avec une erreur d'autorisation Cloudflare.
+- **Envoi** — permission « Email Sending: Send » uniquement. Utilisé par
+  `src/send/client.ts` pour appeler
+  `POST /accounts/{account_id}/email/sending/send`.
+- **Routage** — permission « Email Routing: Read » uniquement. Utilisé par
+  `src/forwarding/destinations.ts` pour lister les destinations vérifiées que
+  l'interface propose dans le formulaire de redirection.
+
+Les séparer garde le moindre privilège : une fuite du token d'envoi ne donne pas
+accès à la configuration de routage, et réciproquement. Un token trop permissif
+serait un risque inutile ; un token absent ou mal scopé fait échouer l'opération
+correspondante avec une erreur d'autorisation Cloudflare.
 
 ### 9. Poser les secrets
 
 ```bash
 pnpm wrangler secret put CF_ACCOUNT_ID
 pnpm wrangler secret put CF_API_TOKEN
+pnpm wrangler secret put CF_ROUTING_TOKEN
 ```
 
-Ces deux commandes produisent les secrets chiffrés lus par `src/send/client.ts`
-via `env.CF_ACCOUNT_ID` et `env.CF_API_TOKEN` — dont le jeton créé à l'étape 8.
-Sans eux, toute tentative de réponse ou d'envoi échoue immédiatement au moment
-de l'appel à l'API Cloudflare. Elles s'appliquent au Worker, qui doit donc déjà
-exister (étape 4).
+Ces trois commandes produisent les secrets chiffrés lus par le Worker :
+`CF_ACCOUNT_ID` et `CF_API_TOKEN` par `src/send/client.ts` (envoi),
+`CF_ROUTING_TOKEN` par `src/forwarding/destinations.ts` (lecture des
+destinations vérifiées). Sans les deux premiers, toute tentative de réponse ou
+d'envoi échoue immédiatement ; sans le troisième, le formulaire de redirection
+répond « Impossible de lire les destinations vérifiées » et aucune règle ne peut
+être créée. Elles s'appliquent au Worker, qui doit donc déjà exister (étape 4).
 
 ### 10. Déploiement final
 
@@ -253,6 +287,12 @@ existante correspondante (en décrémentant au passage les compteurs du thread
 d'origine) puis rappelle `storeIncoming` comme si le message venait d'arriver.
 C'est la fonction à utiliser pour rejouer un message après un correctif du
 parseur, sans avoir à faire renvoyer l'email par l'expéditeur d'origine.
+
+**`reparse` ne rejoue pas les redirections.** Elle rejoue l'ingestion d'un
+message déjà stocké ; re-forwarder à cette occasion enverrait un doublon aux
+destinataires externes, qui ont déjà reçu leur copie lors de la réception
+initiale. Un rejeu corrige donc la ligne D1 et le contenu indexé, jamais ce qui
+est déjà parti.
 
 **Aucun point d'entrée n'est livré aujourd'hui.** `reparse` n'est appelée nulle
 part dans le code : ni route API, ni script, ni commande `wrangler`. Elle
