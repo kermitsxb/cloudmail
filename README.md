@@ -43,8 +43,11 @@ Telles que définies dans `package.json` :
   auth, envoi) puis `pnpm --filter web test` (24 tests côté SPA).
 - `pnpm build` — construit uniquement le SPA (`pnpm --filter web build`), dont la
   sortie (`web/dist`) est servie par le Worker via le binding `ASSETS`.
-- `pnpm deploy` — enchaîne `pnpm build` puis `pnpm wrangler deploy` : reconstruit
-  le SPA puis déploie le Worker (code + assets) sur Cloudflare.
+- `pnpm run deploy` — enchaîne `pnpm build` puis `pnpm wrangler deploy` :
+  reconstruit le SPA puis déploie le Worker (code + assets) sur Cloudflare. Le
+  `run` n'est pas optionnel ici : dans un workspace pnpm, `deploy` est une
+  commande native de pnpm, et `pnpm deploy` échoue donc avec
+  `ERR_PNPM_NOTHING_TO_DEPLOY` sans jamais lancer le script.
 - `pnpm typecheck` — `tsc --noEmit`, non demandé par le brief mais utile en
   local.
 
@@ -130,7 +133,7 @@ tout envoi avec `unknown_sender`.
 ### 4. Premier déploiement (fait exister le Worker)
 
 ```bash
-pnpm deploy
+pnpm run deploy
 ```
 
 Ce premier déploiement n'a qu'un but : faire exister le Worker `cloudmail` sur
@@ -231,7 +234,7 @@ exister (étape 4).
 ### 10. Déploiement final
 
 ```bash
-pnpm deploy
+pnpm run deploy
 ```
 
 Second et dernier déploiement : cette fois le Worker part avec les secrets
