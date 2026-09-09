@@ -1,8 +1,49 @@
 import type { Env } from "./env";
 import { parseEmail } from "./ingest/parse";
 import { storeIncoming } from "./ingest/store";
+import { matchingDestinations, recordAttempts, type AttemptResult } from "./forwarding/rules";
+
+// Applique les règles de redirection. Entièrement encapsulée dans son propre
+// try/catch : une redirection est un service rendu en plus de l'archivage, jamais
+// une condition de celui-ci. Un échec ici — D1 indisponible, destination
+// dé-vérifiée — ne doit pas coûter l'archivage du message.
+async function applyForwardRules(message: ForwardableEmailMessage, env: Env): Promise<void> {
+  try {
+    const matches = await matchingDestinations(env.DB, message.to);
+    if (matches.length === 0) return;
+
+    const results: AttemptResult[] = [];
+    for (const match of matches) {
+      try {
+        await message.forward(match.destination);
+        results.push({ ruleIds: match.ruleIds, status: "ok" });
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        console.error(JSON.stringify({
+          event: "forward_failed",
+          to: message.to,
+          destination: match.destination,
+          error,
+        }));
+        results.push({ ruleIds: match.ruleIds, status: "error", error });
+      }
+    }
+    await recordAttempts(env.DB, results, Date.now());
+  } catch (err) {
+    console.error(JSON.stringify({
+      event: "forward_rules_failed",
+      to: message.to,
+      error: err instanceof Error ? err.message : String(err),
+    }));
+  }
+}
 
 export async function handleEmail(message: ForwardableEmailMessage, env: Env): Promise<void> {
+  // Les redirections passent AVANT l'archivage : `message.raw` est un
+  // ReadableStream à usage unique, et on ne veut pas dépendre de son état après
+  // consommation par storeIncoming.
+  await applyForwardRules(message, env);
+
   try {
     const raw = await new Response(message.raw).arrayBuffer();
     const res = await storeIncoming(env, raw, { from: message.from, to: message.to });

@@ -19,6 +19,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM recipients"),
     env.DB.prepare("DELETE FROM messages"),
     env.DB.prepare("DELETE FROM threads"),
+    env.DB.prepare("DELETE FROM forward_rules"),
   ]);
 });
 
@@ -95,5 +96,109 @@ describe("reparse", () => {
 
   it("lève si l'objet R2 est introuvable", async () => {
     await expect(reparse(env, "raw/inexistant.eml", "zoe@example.com")).rejects.toThrow();
+  });
+});
+
+const addRule = (matchLocal: string, destination: string, enabled = 1) =>
+  env.DB.prepare(
+    "INSERT INTO forward_rules (match_local, destination, enabled, created_at) VALUES (?, ?, ?, 0)"
+  ).bind(matchLocal, destination, enabled).run();
+
+const countMessages = async () =>
+  (await env.DB.prepare("SELECT COUNT(*) AS n FROM messages").first<{ n: number }>())?.n;
+
+describe("handleEmail — redirections", () => {
+  it("ne forwarde rien quand aucune règle ne correspond", async () => {
+    const msg = fakeMessage("simple.eml");
+    await handleEmail(msg, env);
+    expect(msg.forward).not.toHaveBeenCalled();
+    expect(await countMessages()).toBe(1);
+  });
+
+  it("forwarde vers la destination de la règle qui correspond", async () => {
+    await addRule("thomas", "gmail@exemple.com");
+    const msg = fakeMessage("simple.eml");
+    await handleEmail(msg, env);
+    expect(msg.forward).toHaveBeenCalledWith("gmail@exemple.com");
+    expect(await countMessages()).toBe(1);
+  });
+
+  it("n'envoie qu'une copie quand deux règles visent la même destination", async () => {
+    await addRule("*", "gmail@exemple.com");
+    await addRule("thomas", "gmail@exemple.com");
+    const msg = fakeMessage("simple.eml");
+    await handleEmail(msg, env);
+    expect(msg.forward).toHaveBeenCalledTimes(1);
+  });
+
+  it("archive le message même si le forward échoue, et enregistre l'erreur", async () => {
+    await addRule("thomas", "gmail@exemple.com");
+    const msg = fakeMessage("simple.eml");
+    (msg.forward as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("destination non vérifiée"));
+
+    await expect(handleEmail(msg, env)).resolves.toBeUndefined();
+
+    expect(await countMessages()).toBe(1);
+    expect(msg.setReject).not.toHaveBeenCalled();
+    const rule = await env.DB.prepare(
+      "SELECT last_status, last_error FROM forward_rules LIMIT 1"
+    ).first<{ last_status: string; last_error: string }>();
+    expect(rule).toMatchObject({ last_status: "error", last_error: "destination non vérifiée" });
+  });
+
+  it("archive le message même si la lecture des règles échoue", async () => {
+    const msg = fakeMessage("simple.eml");
+    // Proxy et non un objet étalé : les méthodes de D1Database vivent sur le
+    // prototype, donc `{ ...env.DB }` perdrait batch(), exec() et consorts dont
+    // storeIncoming a besoin pour archiver — le test échouerait alors pour la
+    // mauvaise raison.
+    const brokenRules = {
+      ...env,
+      DB: new Proxy(env.DB, {
+        get(target, prop) {
+          if (prop === "prepare") {
+            return (sql: string) => {
+              if (sql.includes("forward_rules")) throw new Error("d1 down");
+              return target.prepare(sql);
+            };
+          }
+          const value = Reflect.get(target, prop, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+    } as unknown as typeof env;
+
+    await expect(handleEmail(msg, brokenRules)).resolves.toBeUndefined();
+    expect(await countMessages()).toBe(1);
+    expect(msg.setReject).not.toHaveBeenCalled();
+  });
+
+  it("forwarde même si l'archivage échoue", async () => {
+    await addRule("thomas", "gmail@exemple.com");
+    const msg = fakeMessage("simple.eml");
+    const brokenR2 = {
+      ...env,
+      MAIL: {
+        put: () => {
+          throw new Error("r2 down");
+        },
+      },
+    } as unknown as typeof env;
+
+    await expect(handleEmail(msg, brokenR2)).resolves.toBeUndefined();
+    expect(msg.forward).toHaveBeenCalledWith("gmail@exemple.com");
+    expect(msg.setReject).not.toHaveBeenCalled();
+  });
+
+  it("forwarde avant de consommer message.raw", async () => {
+    await addRule("thomas", "gmail@exemple.com");
+    const msg = fakeMessage("simple.eml");
+    let rawWasLockedAtForward: boolean | null = null;
+    (msg.forward as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      rawWasLockedAtForward = msg.raw.locked;
+    });
+
+    await handleEmail(msg, env);
+    expect(rawWasLockedAtForward).toBe(false);
   });
 });
