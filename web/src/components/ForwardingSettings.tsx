@@ -35,13 +35,29 @@ function RuleRow({ rule, mailDomain }: { rule: ForwardRule; mailDomain: string }
             Dernière tentative en échec : {rule.lastError}
           </p>
         )}
+        {/* Les deux mutations invalident la liste dans onSettled, donc un refus
+            repeint l'état d'avant sans rien dire : l'interrupteur revient à sa
+            place, la ligne reste, et l'utilisateur croit avoir agi. Ces deux
+            messages sont la seule trace de l'échec. */}
+        {update.isError && (
+          <p className="mt-1 text-xs text-destructive">
+            Activation inchangée : {update.error.message}
+          </p>
+        )}
+        {remove.isError && (
+          <p className="mt-1 text-xs text-destructive">
+            Suppression impossible : {remove.error.message}
+          </p>
+        )}
       </div>
 
       <button
         type="button"
         role="switch"
         aria-checked={rule.enabled}
-        aria-label={`Activer la redirection ${label}`}
+        // Le nom accessible annonce l'action offerte, pas l'état courant : sur
+        // une règle déjà active, cliquer la désactive.
+        aria-label={`${rule.enabled ? "Désactiver" : "Activer"} la redirection ${label}`}
         onClick={() => update.mutate({ id: rule.id, enabled: !rule.enabled })}
         className="rounded border border-border px-2 py-1 text-xs aria-[checked=true]:bg-accent"
       >
@@ -144,7 +160,12 @@ function NewRuleForm({ mailDomain, onDone }: { mailDomain: string; onDone: () =>
       {create.isError && <p className="text-xs text-destructive">{create.error.message}</p>}
 
       <div className="flex gap-2">
-        <Button type="submit" disabled={!destination || (!catchAll && !local.trim())}>
+        {/* create.isPending dans la condition : sans lui, un double-clic envoie
+            deux POST et le second répond 409 sur un formulaire déjà fermé. */}
+        <Button
+          type="submit"
+          disabled={create.isPending || !destination || (!catchAll && !local.trim())}
+        >
           Enregistrer
         </Button>
         <Button type="button" variant="ghost" onClick={onDone}>
@@ -159,13 +180,18 @@ export function ForwardingSettings() {
   const config = useConfig();
   const rules = useForwardRules();
   const [adding, setAdding] = useState(false);
-  const mailDomain = config.data?.mailDomain ?? "";
+  // Pas de repli sur "" : le domaine est la moitié droite de chaque adresse
+  // source affichée. Tant qu'il est inconnu — /api/config en cours, ou en échec
+  // définitif — un repli afficherait « contact@ » et un « @ » nu dans le
+  // formulaire, soit une adresse fausse présentée comme vraie. On préfère ne
+  // rien montrer et le dire.
+  const mailDomain = config.data?.mailDomain;
 
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-6">
       <header className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Redirections</h1>
-        {!adding && (
+        {!adding && mailDomain !== undefined && (
           <Button type="button" onClick={() => setAdding(true)}>
             Ajouter une redirection
           </Button>
@@ -177,17 +203,40 @@ export function ForwardingSettings() {
         partir vers plusieurs destinations. Il reste dans tous les cas archivé dans Cloudmail.
       </p>
 
-      {adding && <NewRuleForm mailDomain={mailDomain} onDone={() => setAdding(false)} />}
-
-      {rules.isSuccess && rules.data.length === 0 && (
-        <p className="text-sm text-muted-foreground">Aucune redirection.</p>
+      {/* Distinct de l'état vide, et non silencieux : une installation dont la
+          migration 0002 n'a pas été appliquée reçoit un 500 sur cette route, et
+          lire « aucune redirection » lui ferait croire la fonctionnalité en
+          ordre de marche. */}
+      {rules.isError && (
+        <p className="text-sm text-destructive">
+          Impossible de lire les redirections : {rules.error.message}. Si la fonctionnalité vient
+          d'être déployée, la migration <code>0002_forward_rules.sql</code> n'a peut-être pas été
+          appliquée sur la base D1 (voir l'étape 2 de la mise en service, dans le README).
+        </p>
       )}
 
-      <ul>
-        {rules.data?.map((rule) => (
-          <RuleRow key={rule.id} rule={rule} mailDomain={mailDomain} />
-        ))}
-      </ul>
+      {config.isError && (
+        <p className="text-sm text-destructive">
+          Le domaine de messagerie n'a pas pu être lu : les adresses sources seraient incomplètes,
+          les redirections ne sont donc pas affichées. Rechargez la page.
+        </p>
+      )}
+
+      {mailDomain !== undefined && (
+        <>
+          {adding && <NewRuleForm mailDomain={mailDomain} onDone={() => setAdding(false)} />}
+
+          {rules.isSuccess && rules.data.length === 0 && (
+            <p className="text-sm text-muted-foreground">Aucune redirection.</p>
+          )}
+
+          <ul>
+            {rules.data?.map((rule) => (
+              <RuleRow key={rule.id} rule={rule} mailDomain={mailDomain} />
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   );
 }

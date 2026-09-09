@@ -28,16 +28,39 @@ const rule = (over: Partial<Record<string, unknown>> = {}) => ({
 // (config, règles, destinations) et l'ordre n'est pas garanti.
 const stubApi = (opts: {
   rules?: unknown[];
+  rulesStatus?: number;
+  configStatus?: number;
   destinations?: string[];
   destinationsStatus?: number;
+  mutationStatus?: number;
+  mutationPending?: boolean;
 }) =>
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    if (url === "/api/config") return json({ mailDomain: "planigramme.fr" });
-    if (url === "/api/forwarding/rules") return json(opts.rules ?? []);
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/config") {
+      return opts.configStatus
+        ? json({ error: { code: "internal", message: "panne" } }, opts.configStatus)
+        : json({ mailDomain: "planigramme.fr" });
+    }
+    if (url === "/api/forwarding/rules" && (init?.method ?? "GET") === "GET") {
+      return opts.rulesStatus
+        ? json({ error: { code: "internal", message: "no such table: forward_rules" } }, opts.rulesStatus)
+        : json(opts.rules ?? []);
+    }
     if (url === "/api/forwarding/destinations") {
       return opts.destinationsStatus === 503
         ? json({ error: { code: "routing_unavailable", message: "indisponible" } }, 503)
         : json({ destinations: opts.destinations ?? [] });
+    }
+    // Une mutation qui ne répond jamais : la seule façon d'observer l'état
+    // « envoi en cours » d'un formulaire qui se referme dès le succès.
+    if (opts.mutationPending) return new Promise<Response>(() => {});
+    // Les mutations (POST/PATCH/DELETE) partagent le même sort : c'est leur
+    // échec qui doit devenir visible, pas la route précise qui l'a produit.
+    if (opts.mutationStatus) {
+      return json(
+        { error: { code: "not_found", message: "Redirection introuvable" } },
+        opts.mutationStatus,
+      );
     }
     return json({ ok: true });
   }));
@@ -137,12 +160,73 @@ describe("ForwardingSettings", () => {
     stubApi({ rules: [rule()] });
     render(<ForwardingSettings />, { wrapper });
 
-    await userEvent.click(await screen.findByRole("switch", { name: /Activer/ }));
+    // La règle du fixture est active : l'action offerte est donc de la désactiver.
+    await userEvent.click(await screen.findByRole("switch", { name: /Désactiver/ }));
     await waitFor(() => {
       const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
         ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
       );
       expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ enabled: false });
     });
+  });
+
+  it("signale l'échec de lecture des règles au lieu d'un état vide", async () => {
+    stubApi({ rulesStatus: 500 });
+    render(<ForwardingSettings />, { wrapper });
+
+    expect(await screen.findByText(/Impossible de lire les redirections/)).toBeDefined();
+    // Un 500 ne doit surtout pas se lire comme « vous n'avez aucune redirection ».
+    expect(screen.queryByText("Aucune redirection.")).toBeNull();
+  });
+
+  it("signale l'échec de la bascule dans la ligne concernée", async () => {
+    stubApi({ rules: [rule()], mutationStatus: 404 });
+    render(<ForwardingSettings />, { wrapper });
+
+    await userEvent.click(await screen.findByRole("switch", { name: /Désactiver/ }));
+    expect(await screen.findByText(/Activation inchangée/)).toBeDefined();
+  });
+
+  it("signale l'échec de la suppression dans la ligne concernée", async () => {
+    stubApi({ rules: [rule()], mutationStatus: 404 });
+    render(<ForwardingSettings />, { wrapper });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Supprimer la redirection contact@planigramme.fr" }),
+    );
+    expect(await screen.findByText(/Suppression impossible/)).toBeDefined();
+  });
+
+  it("propose de désactiver une règle active et d'activer une règle inactive", async () => {
+    stubApi({ rules: [rule(), rule({ id: 2, matchLocal: "perso", enabled: false })] });
+    render(<ForwardingSettings />, { wrapper });
+
+    expect(
+      await screen.findByRole("switch", { name: "Désactiver la redirection contact@planigramme.fr" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("switch", { name: "Activer la redirection perso@planigramme.fr" }),
+    ).toBeDefined();
+  });
+
+  it("désactive Enregistrer pendant l'envoi pour empêcher un double POST", async () => {
+    stubApi({ rules: [], destinations: ["gmail@exemple.com"], mutationPending: true });
+    render(<ForwardingSettings />, { wrapper });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Ajouter une redirection" }));
+    await userEvent.type(await screen.findByLabelText("Partie locale"), "contact");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Vers" }), "gmail@exemple.com");
+    const submit = screen.getByRole("button", { name: "Enregistrer" });
+    await userEvent.click(submit);
+    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(true));
+  });
+
+  it("n'affiche aucune adresse tronquée quand le domaine est inconnu", async () => {
+    stubApi({ rules: [rule()], configStatus: 500 });
+    render(<ForwardingSettings />, { wrapper });
+
+    expect(await screen.findByText(/domaine de messagerie/i)).toBeDefined();
+    expect(screen.queryByText(/contact@$/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ajouter une redirection" })).toBeNull();
   });
 });

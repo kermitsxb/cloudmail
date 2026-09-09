@@ -26,7 +26,7 @@ async function forwardWithTimeout(
   message: ForwardableEmailMessage,
   destination: string,
 ): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   try {
     await Promise.race([
       message.forward(destination),
