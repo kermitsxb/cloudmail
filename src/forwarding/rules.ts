@@ -47,3 +47,37 @@ export async function matchingDestinations(db: D1Database, to: string): Promise<
   }
   return [...byDestination.values()];
 }
+
+export type AttemptResult = { ruleIds: number[]; status: "ok" | "error"; error?: string };
+
+// Borne de stockage du message d'erreur. Les erreurs de l'API Cloudflare sont
+// courtes ; la borne existe pour qu'une exception inattendue et volumineuse ne
+// fasse pas grossir indéfiniment une ligne relue à chaque affichage de l'UI.
+const MAX_ERROR_CHARS = 500;
+
+export async function recordAttempts(
+  db: D1Database,
+  results: AttemptResult[],
+  now: number,
+): Promise<void> {
+  const statements = results.flatMap((r) =>
+    r.ruleIds.map((id) =>
+      db
+        .prepare(
+          `UPDATE forward_rules
+              SET last_attempt_at = ?, last_status = ?, last_error = ?
+            WHERE id = ?`
+        )
+        .bind(
+          now,
+          r.status,
+          r.status === "error" ? (r.error ?? "Erreur inconnue").slice(0, MAX_ERROR_CHARS) : null,
+          id,
+        )
+    )
+  );
+  // db.batch() rejette un tableau vide : on sort avant plutôt que de laisser
+  // remonter une erreur pour un cas parfaitement normal (aucune règle ne matche).
+  if (statements.length === 0) return;
+  await db.batch(statements);
+}
