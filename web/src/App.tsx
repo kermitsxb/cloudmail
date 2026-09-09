@@ -47,7 +47,12 @@ function Mailbox() {
           />
         </div>
       </div>
-      <div className={selectedThreadId === null ? "hidden lg:flex" : "flex"}>
+      {/* flex-col : en flex-row, ThreadView se dimensionnerait sur son contenu au lieu
+          d'occuper toute la colonne. min-w-0 laisse le contenu large (iframe, sujet long)
+          rétrécir plutôt que d'élargir la piste de grille. */}
+      <div
+        className={`min-w-0 flex-col ${selectedThreadId === null ? "hidden lg:flex" : "flex"}`}
+      >
         {selectedThreadId === null ? (
           <p className="m-auto text-sm text-muted-foreground">Sélectionnez une conversation.</p>
         ) : (
