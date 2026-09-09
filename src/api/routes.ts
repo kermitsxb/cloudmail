@@ -71,7 +71,15 @@ const forwardRulePatchBody = z.object({ enabled: z.boolean() });
 // à afficher tel quel à l'utilisateur, qui verrait un dump de la sérialisation
 // interne de zod plutôt qu'une phrase compréhensible. Ce helper construit à la
 // place un message en français, à partir des chemins de champs en erreur.
+//
+// Exception : les issues de code `custom` portent le message passé à
+// `.refine()`, donc rédigé ici même, en français et pour l'utilisateur. Une
+// formulation générique par chemin de champ serait un recul par rapport à elles
+// — moins précise, et laissant fuiter un nom de champ anglais dans de la prose
+// française. On les préfère donc dès qu'il en existe une.
 const formatValidationError = (error: z.ZodError): string => {
+  const rediges = error.issues.filter((issue) => issue.code === "custom").map((issue) => issue.message);
+  if (rediges.length > 0) return rediges.join(" ; ");
   const champs = error.issues.map((issue) => issue.path.join(".") || "le corps de la requête");
   return `Requête invalide : vérifiez ${champs.join(", ")}.`;
 };
