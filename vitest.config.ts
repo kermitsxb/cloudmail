@@ -23,7 +23,16 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
-          bindings: { TEST_MIGRATIONS: migrations, TEST_FIXTURES: fixtures },
+          bindings: {
+            TEST_MIGRATIONS: migrations,
+            TEST_FIXTURES: fixtures,
+            // Neutralise le contournement d'authentification que `.dev.vars` active
+            // pour `wrangler dev`. Sans ça, tout développeur ayant suivi la mise en
+            // route locale voit les tests de la frontière Access échouer, alors que
+            // la production ne charge jamais `.dev.vars`. Les tests qui ont besoin du
+            // contournement l'injectent explicitement via `app.request(url, init, env)`.
+            DEV_BYPASS_AUTH: "",
+          },
         },
       }),
     ],

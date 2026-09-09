@@ -61,6 +61,15 @@ describe("verifyAccessJwt", () => {
   });
 });
 
+describe("environnement de test", () => {
+  it("n'active jamais DEV_BYPASS_AUTH globalement", () => {
+    // `.dev.vars` (local, ignoré par git) pose DEV_BYPASS_AUTH=1 pour `wrangler dev`.
+    // vitest.config.ts le neutralise par un binding explicite : sans cela, les tests
+    // de la frontière Access ci-dessous passeraient à côté de ce qu'ils vérifient.
+    expect(env.DEV_BYPASS_AUTH || "").not.toBe("1");
+  });
+});
+
 describe("middleware", () => {
   it("répond 401 sans en-tête Access", async () => {
     const res = await SELF.fetch("https://example.com/api/identities");
