@@ -5,9 +5,8 @@
   "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  // Remplacer "mail.example.com" par le sous-domaine sur lequel Cloudmail doit être
-  // exposé (voir la section « Mise en service » du README). Ce domaine doit être géré
-  // sur le compte Cloudflare qui héberge le Worker.
+  // Sous-domaine sur lequel Cloudmail est exposé (voir la section « Mise en service »
+  // du README). Ce domaine doit être géré sur le compte Cloudflare qui héberge le Worker.
   "routes": [{ "pattern": "mail.example.com", "custom_domain": true }],
   "assets": {
     "directory": "./web/dist",
@@ -19,10 +18,9 @@
     {
       "binding": "DB",
       "database_name": "cloudmail",
-      // Placeholder : à remplacer par l'identifiant réel de la base D1 distante lors de la
-      // mise en service (voir la section « Mise en service » du README, étape 1). En
-      // attendant, "local" suffit : Miniflare fournit D1 et R2 en local pour `wrangler dev`
-      // et les tests Vitest, sans authentification Cloudflare.
+      // Identifiant de la base D1 distante (créée à l'étape 1 de la section « Mise en
+      // service » du README). En local, `wrangler dev` et les tests Vitest n'utilisent pas
+      // cette valeur : Miniflare simule D1 et R2 sans authentification Cloudflare.
       "database_id": "local",
       "migrations_dir": "migrations"
     }
