@@ -2,6 +2,7 @@ import type { Env } from "../env";
 
 export type SendRequest = {
   from: string;
+  fromName?: string | null; // display_name de l'identité expéditrice (voir src/identities.ts)
   to: string[];
   cc?: string[];
   subject: string;
@@ -56,7 +57,9 @@ export async function sendEmail(env: Env, req: SendRequest): Promise<SendResult>
   if (req.references?.length) headers["References"] = req.references.join(" ");
 
   const body: Record<string, unknown> = {
-    from: req.from,
+    // Un nom affiché transforme `from` en objet : c'est ce qui manquait pour que les clients
+    // de messagerie (Gmail, etc.) affichent autre chose que l'adresse brute de l'expéditeur.
+    from: req.fromName ? { address: req.from, name: req.fromName } : req.from,
     to: req.to,
     subject: req.subject,
     text: req.text,

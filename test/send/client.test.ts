@@ -47,6 +47,17 @@ describe("sendEmail", () => {
     });
   });
 
+  it("envoie from comme {address, name} quand fromName est fourni", async () => {
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      body = JSON.parse(init.body as string);
+      return Response.json({ result: { delivered: [], queued: [], permanent_bounces: [] }, success: true });
+    });
+
+    await sendEmail(testEnv(), { ...base, fromName: "Your Name" });
+    expect(body.from).toEqual({ address: "thomas@example.com", name: "Your Name" });
+  });
+
   it("lève une SendError avec le statut sur une erreur 429", async () => {
     vi.stubGlobal("fetch", async () => new Response("rate limited", { status: 429 }));
     await expect(sendEmail(testEnv(), base)).rejects.toMatchObject({ status: 429 });

@@ -138,9 +138,10 @@ api.post("/messages", async (c) => {
   }
 
   // L'expéditeur doit être une identité connue : un `from` arbitraire est refusé avant tout
-  // appel réseau, donc avant toute consommation du quota d'envoi.
-  const identity = await c.env.DB.prepare("SELECT address FROM identities WHERE address = ?")
-    .bind(parsed.data.from).first();
+  // appel réseau, donc avant toute consommation du quota d'envoi. On récupère au passage son
+  // display_name, pour que l'email envoyé porte "Nom <adresse>" plutôt que l'adresse seule.
+  const identity = await c.env.DB.prepare("SELECT display_name FROM identities WHERE address = ?")
+    .bind(parsed.data.from).first<{ display_name: string | null }>();
   if (!identity) {
     return c.json({ error: { code: "unknown_sender", message: "Expéditeur inconnu" } }, 400);
   }
@@ -153,7 +154,7 @@ api.post("/messages", async (c) => {
     if (parent) references = [parent.message_id];
   }
 
-  const req: SendRequest = { ...parsed.data, references };
+  const req: SendRequest = { ...parsed.data, fromName: identity.display_name, references };
   // Vérifié aussi côté client (sendEmail) : le refus explicite ici avec le code 413 donne un
   // statut HTTP clair à l'appelant, avant même de tenter l'appel réseau.
   if (payloadSize(req) > MAX_PAYLOAD_BYTES) {

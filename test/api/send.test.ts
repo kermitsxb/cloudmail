@@ -62,6 +62,17 @@ describe("POST /api/messages", () => {
     });
   });
 
+  it("transmet le nom affiché de l'identité expéditrice à l'API d'envoi", async () => {
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      body = JSON.parse(init.body as string);
+      return Response.json({ success: true, result: { delivered: ["zoe@example.com"], queued: [], permanent_bounces: [] } });
+    });
+
+    await post(valid);
+    expect(body.from).toEqual({ address: "thomas@example.com", name: "Thomas" });
+  });
+
   it("refuse un expéditeur qui n'est pas une identité connue", async () => {
     ok();
     const res = await post({ ...valid, from: "usurpateur@ailleurs.com" });
