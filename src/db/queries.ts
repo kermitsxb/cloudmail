@@ -150,14 +150,3 @@ export async function getThread(db: D1Database, id: number): Promise<ThreadDetai
     })),
   };
 }
-
-export async function listIdentities(db: D1Database) {
-  const rows = await db.prepare(
-    "SELECT address, display_name, is_default FROM identities ORDER BY is_default DESC, address ASC"
-  ).all<{ address: string; display_name: string | null; is_default: number }>();
-  return rows.results.map((r) => ({
-    address: r.address,
-    displayName: r.display_name,
-    isDefault: Boolean(r.is_default),
-  }));
-}

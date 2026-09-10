@@ -19,8 +19,8 @@ export function Sidebar({
 }: {
   folder: string;
   onSelectFolder: (folder: string) => void;
-  view: "mail" | "forwarding";
-  onSelectView: (view: "mail" | "forwarding") => void;
+  view: "mail" | "forwarding" | "identities";
+  onSelectView: (view: "mail" | "forwarding" | "identities") => void;
 }) {
   const { data: identities } = useIdentities();
   const [composerOpen, setComposerOpen] = useState(false);
@@ -58,6 +58,16 @@ export function Sidebar({
       </ul>
 
       <ul className="flex flex-col gap-1">
+        <li>
+          <button
+            type="button"
+            aria-current={view === "identities" ? "true" : undefined}
+            onClick={() => onSelectView("identities")}
+            className="w-full rounded px-3 py-2 text-left text-sm hover:bg-accent aria-[current=true]:bg-accent aria-[current=true]:font-semibold"
+          >
+            Identités
+          </button>
+        </li>
         <li>
           <button
             type="button"

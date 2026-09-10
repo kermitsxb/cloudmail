@@ -1,6 +1,6 @@
 import { env, applyD1Migrations } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { listThreads, getThread, listIdentities } from "../../src/db/queries";
+import { listThreads, getThread } from "../../src/db/queries";
 import { app } from "../../src/index";
 
 interface TestEnv {
@@ -179,14 +179,6 @@ describe("getThread", () => {
 
   it("retourne null pour un thread inexistant", async () => {
     expect(await getThread(env.DB, 999)).toBeNull();
-  });
-});
-
-describe("listIdentities", () => {
-  it("retourne l'identité par défaut en premier", async () => {
-    await env.DB.prepare("INSERT INTO identities (address, display_name, is_default) VALUES ('b@example.com', 'B', 0), ('a@example.com', 'A', 1)").run();
-    const ids = await listIdentities(env.DB);
-    expect(ids[0]).toEqual({ address: "a@example.com", displayName: "A", isDefault: true });
   });
 });
 

@@ -266,12 +266,17 @@ pnpm wrangler d1 execute cloudmail --remote -c .wrangler/generated.jsonc --comma
 ```
 
 Remplacer `vous@example.com` et `Votre Nom` par l'adresse d'envoi et le nom
-affiché souhaités, sur votre propre domaine.
+affiché souhaités, sur votre propre domaine — c'est ce nom qui apparaîtra chez
+le destinataire comme expéditeur (« Votre Nom <vous@example.com> » plutôt que
+l'adresse seule).
 
 Cette étape crée l'identité d'envoi par défaut ; elle a besoin des tables de
 l'étape 2. Sans ligne dans `identities`, l'API n'a aucune adresse `From` à
 proposer pour composer ou répondre à un message, et `POST /api/messages` refuse
-tout envoi avec `unknown_sender`.
+tout envoi avec `unknown_sender`. En SQL uniquement ici parce que le Worker
+n'est pas encore déployé (étape 4) ni Access configuré (étape 7) — l'onglet
+« Identités » de l'interface fait ensuite l'affaire pour toute identité
+supplémentaire, sans repasser par `wrangler d1 execute`.
 
 ### 4. Premier déploiement (fait exister le Worker)
 

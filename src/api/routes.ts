@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
 import type { AccessIdentity } from "../auth/access";
-import { getThread, listIdentities, listThreads } from "../db/queries";
+import { getThread, listThreads } from "../db/queries";
 import { moveToFolder, purgeMessage, setRead, storeOutgoing } from "../db/mutations";
 import { sanitizeHtml } from "../html/sanitize";
 import { MAX_PAYLOAD_BYTES, SendError, payloadSize, sendEmail, type SendRequest } from "../send/client";
@@ -14,6 +14,7 @@ import {
   setForwardRuleEnabled,
 } from "../forwarding/rules";
 import { RoutingUnavailableError, listVerifiedDestinations } from "../forwarding/destinations";
+import { createIdentity, deleteIdentity, listIdentities, updateIdentity } from "../identities";
 
 export type ApiEnv = { Bindings: Env; Variables: { identity: AccessIdentity } };
 
@@ -66,6 +67,27 @@ const forwardRuleBody = z.object({
 });
 
 const forwardRulePatchBody = z.object({ enabled: z.boolean() });
+
+// Même jeu de caractères que matchLocal ci-dessus, sans la sentinelle catch-all :
+// une identité désigne toujours une adresse concrète, jamais « toutes les
+// adresses ». Le domaine n'est pas saisi : il est imposé à MAIL_DOMAIN, la seule
+// valeur pour laquelle l'API Cloudflare Email Sending accepte d'envoyer.
+const identityBody = z.object({
+  localPart: z
+    .string()
+    .trim()
+    .max(64)
+    .transform((v) => v.toLowerCase())
+    .refine((v) => /^[a-z0-9._%+-]+$/.test(v), { message: "Partie locale invalide" }),
+  displayName: z.string().trim().max(200).optional(),
+});
+
+const identityPatchBody = z.object({
+  displayName: z.string().trim().max(200).nullable().optional(),
+  isDefault: z.boolean().optional(),
+}).refine((b) => b.displayName !== undefined || b.isDefault !== undefined, {
+  message: "Fournir displayName ou isDefault",
+});
 
 // `ZodError.message` est un JSON.stringify des issues (en anglais) : impossible
 // à afficher tel quel à l'utilisateur, qui verrait un dump de la sérialisation
@@ -126,6 +148,47 @@ api.get("/threads/:id", async (c) => {
 });
 
 api.get("/identities", async (c) => c.json(await listIdentities(c.env.DB)));
+
+api.post("/identities", async (c) => {
+  const parsed = identityBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
+  }
+
+  const address = `${parsed.data.localPart}@${c.env.MAIL_DOMAIN}`;
+  const identity = await createIdentity(c.env.DB, { address, displayName: parsed.data.displayName ?? null });
+  if (!identity) {
+    return c.json({
+      error: { code: "duplicate_identity", message: "Cette identité existe déjà" },
+    }, 409);
+  }
+  return c.json(identity, 201);
+});
+
+api.patch("/identities/:address", async (c) => {
+  const parsed = identityPatchBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
+  }
+  const found = await updateIdentity(c.env.DB, c.req.param("address"), parsed.data);
+  if (!found) {
+    return c.json({ error: { code: "not_found", message: "Identité introuvable" } }, 404);
+  }
+  return c.json({ ok: true });
+});
+
+api.delete("/identities/:address", async (c) => {
+  const result = await deleteIdentity(c.env.DB, c.req.param("address"));
+  if (result === "not_found") {
+    return c.json({ error: { code: "not_found", message: "Identité introuvable" } }, 404);
+  }
+  if (result === "last") {
+    return c.json({
+      error: { code: "last_identity", message: "Impossible de supprimer la dernière identité restante" },
+    }, 409);
+  }
+  return c.json({ ok: true });
+});
 
 // Envoie un email via l'API Cloudflare Email Sending puis, seulement si l'envoi a réussi,
 // stocke une copie du message dans le dossier "sent". Le CF_API_TOKEN utilisé par sendEmail

@@ -90,6 +90,36 @@ export const useThread = (id: number | null) =>
 export const useIdentities = () =>
   useQuery({ queryKey: ["identities"], queryFn: () => api<Identity[]>("/identities") });
 
+export const useCreateIdentity = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { localPart: string; displayName?: string }) =>
+      api<Identity>("/identities", { method: "POST", body: JSON.stringify(vars) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["identities"] }),
+  });
+};
+
+export const useUpdateIdentity = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ address, ...body }: { address: string; displayName?: string; isDefault?: boolean }) =>
+      api<{ ok: true }>(`/identities/${encodeURIComponent(address)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["identities"] }),
+  });
+};
+
+export const useDeleteIdentity = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (address: string) =>
+      api<{ ok: true }>(`/identities/${encodeURIComponent(address)}`, { method: "DELETE" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["identities"] }),
+  });
+};
+
 export type SendMessageRequest = {
   from: string;
   to: string[];

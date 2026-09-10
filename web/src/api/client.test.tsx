@@ -4,9 +4,12 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useCreateForwardRule,
+  useCreateIdentity,
   useDeleteForwardRule,
+  useDeleteIdentity,
   useForwardRules,
   useThreads,
+  useUpdateIdentity,
 } from "./client";
 
 const wrapper = ({ children }: { children: ReactNode }) => {
@@ -127,6 +130,57 @@ describe("hooks de redirection", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe("/api/forwarding/rules/7");
+    expect(init.method).toBe("DELETE");
+  });
+});
+
+describe("hooks d'identités", () => {
+  it("useCreateIdentity poste la partie locale et le nom affiché", async () => {
+    const fetchSpy = vi.fn(async (_url: string, _init: RequestInit) =>
+      new Response(JSON.stringify({ address: "thomas@exemple.com", displayName: "Thomas", isDefault: false }), {
+        status: 201, headers: { "content-type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { result } = renderHook(() => useCreateIdentity(), { wrapper });
+    result.current.mutate({ localPart: "thomas", displayName: "Thomas" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe("/api/identities");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ localPart: "thomas", displayName: "Thomas" });
+  });
+
+  it("useUpdateIdentity appelle PATCH sur l'adresse", async () => {
+    const fetchSpy = vi.fn(async (_url: string, _init: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { result } = renderHook(() => useUpdateIdentity(), { wrapper });
+    result.current.mutate({ address: "thomas@exemple.com", isDefault: true });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe("/api/identities/thomas%40exemple.com");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body as string)).toEqual({ isDefault: true });
+  });
+
+  it("useDeleteIdentity appelle DELETE sur l'adresse", async () => {
+    const fetchSpy = vi.fn(async (_url: string, _init: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { result } = renderHook(() => useDeleteIdentity(), { wrapper });
+    result.current.mutate("thomas@exemple.com");
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe("/api/identities/thomas%40exemple.com");
     expect(init.method).toBe("DELETE");
   });
 });
