@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useIdentities } from "../api/client";
+import logo from "../assets/cloudmail-logo.png";
 import { Composer } from "./Composer";
 import { ComposerPanel } from "./ComposerPanel";
 import { Button } from "./ui/button";
@@ -26,6 +27,11 @@ export function Sidebar({
 
   return (
     <nav aria-label="Dossiers" className="flex h-full flex-col gap-6 border-r border-border p-4">
+      <div className="flex items-center gap-2 px-1">
+        <img src={logo} alt="" className="h-6 w-6" />
+        <span className="text-sm font-semibold">Cloudmail</span>
+      </div>
+
       <Button type="button" onClick={() => setComposerOpen(true)}>
         Nouveau message
       </Button>
