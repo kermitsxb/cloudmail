@@ -51,6 +51,20 @@ describe("useThreads", () => {
     await waitFor(() => expect(result.current.hasNextPage).toBe(false));
   });
 
+  // Le bouton de rafraîchissement (et le polling automatique) reposent tous deux sur
+  // `refetch()` : un appel doit redemander la liste sans perdre les pages déjà chargées.
+  it("refetch() redemande les pages déjà chargées", async () => {
+    const { result } = renderHook(() => useThreads("inbox", ""), { wrapper });
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    result.current.fetchNextPage();
+    await waitFor(() => expect(calls).toHaveLength(2));
+
+    result.current.refetch();
+    await waitFor(() => expect(calls).toHaveLength(4));
+    expect(result.current.data?.pages.flatMap((p) => p.threads).map((t) => t.id)).toEqual([1, 2]);
+  });
+
   it("transporte la recherche dans chaque page", async () => {
     const { result } = renderHook(() => useThreads("inbox", "facture"), { wrapper });
     await waitFor(() => expect(result.current.hasNextPage).toBe(true));

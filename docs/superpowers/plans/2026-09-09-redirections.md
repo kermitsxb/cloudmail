@@ -119,20 +119,20 @@ describe("localPart", () => {
 describe("matchingDestinations", () => {
   it("retient la règle nominative", async () => {
     await addRule("contact", "a@exemple.com");
-    const matches = await matchingDestinations(env.DB, "contact@planigramme.fr");
+    const matches = await matchingDestinations(env.DB, "contact@example.com");
     expect(matches).toEqual([{ ruleIds: [expect.any(Number)], destination: "a@exemple.com" }]);
   });
 
   it("retient la règle catch-all pour n'importe quelle adresse", async () => {
     await addRule(CATCH_ALL, "a@exemple.com");
-    const matches = await matchingDestinations(env.DB, "nimportequoi@planigramme.fr");
+    const matches = await matchingDestinations(env.DB, "nimportequoi@example.com");
     expect(matches.map((m) => m.destination)).toEqual(["a@exemple.com"]);
   });
 
   it("cumule règle nominative et catch-all", async () => {
     await addRule(CATCH_ALL, "archive@exemple.com");
     await addRule("thomas", "gmail@exemple.com");
-    const matches = await matchingDestinations(env.DB, "thomas@planigramme.fr");
+    const matches = await matchingDestinations(env.DB, "thomas@example.com");
     expect(matches.map((m) => m.destination).sort()).toEqual([
       "archive@exemple.com",
       "gmail@exemple.com",
@@ -142,14 +142,14 @@ describe("matchingDestinations", () => {
   it("dédoublonne les destinations identiques en conservant les deux règles", async () => {
     await addRule(CATCH_ALL, "gmail@exemple.com");
     await addRule("thomas", "GMAIL@exemple.com");
-    const matches = await matchingDestinations(env.DB, "thomas@planigramme.fr");
+    const matches = await matchingDestinations(env.DB, "thomas@example.com");
     expect(matches).toHaveLength(1);
     expect(matches[0].ruleIds).toHaveLength(2);
   });
 
   it("ignore les règles désactivées", async () => {
     await addRule("thomas", "a@exemple.com", 0);
-    expect(await matchingDestinations(env.DB, "thomas@planigramme.fr")).toEqual([]);
+    expect(await matchingDestinations(env.DB, "thomas@example.com")).toEqual([]);
   });
 
   it("compare la partie locale sans tenir compte de la casse", async () => {
@@ -1028,7 +1028,7 @@ const withEnv = () => ({
   DEV_BYPASS_AUTH: "1",
   CF_ACCOUNT_ID: "acc",
   CF_ROUTING_TOKEN: "tok",
-  MAIL_DOMAIN: "planigramme.fr",
+  MAIL_DOMAIN: "example.com",
 });
 
 const req = (path: string, init?: RequestInit) =>
@@ -1045,7 +1045,7 @@ describe("GET /api/config", () => {
   it("expose le domaine de courrier", async () => {
     const res = await req("/api/config");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ mailDomain: "planigramme.fr" });
+    expect(await res.json()).toEqual({ mailDomain: "example.com" });
   });
 });
 
@@ -1574,7 +1574,7 @@ const stubApi = (opts: {
   destinationsStatus?: number;
 }) =>
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    if (url === "/api/config") return json({ mailDomain: "planigramme.fr" });
+    if (url === "/api/config") return json({ mailDomain: "example.com" });
     if (url === "/api/forwarding/rules") return json(opts.rules ?? []);
     if (url === "/api/forwarding/destinations") {
       return opts.destinationsStatus === 503
@@ -1589,7 +1589,7 @@ describe("ForwardingSettings", () => {
     stubApi({ rules: [rule(), rule({ id: 2, matchLocal: "*", destination: "a@exemple.com" })] });
     render(<ForwardingSettings />, { wrapper });
 
-    expect(await screen.findByText("contact@planigramme.fr")).toBeDefined();
+    expect(await screen.findByText("contact@example.com")).toBeDefined();
     expect(screen.getByText("Toutes les adresses")).toBeDefined();
     expect(screen.getByText("gmail@exemple.com")).toBeDefined();
   });
@@ -1665,7 +1665,7 @@ describe("ForwardingSettings", () => {
     render(<ForwardingSettings />, { wrapper });
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Supprimer la redirection contact@planigramme.fr" }),
+      await screen.findByRole("button", { name: "Supprimer la redirection contact@example.com" }),
     );
     await waitFor(() => {
       const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(

@@ -39,7 +39,7 @@ const stubApi = (opts: {
     if (url === "/api/config") {
       return opts.configStatus
         ? json({ error: { code: "internal", message: "panne" } }, opts.configStatus)
-        : json({ mailDomain: "planigramme.fr" });
+        : json({ mailDomain: "example.com" });
     }
     if (url === "/api/forwarding/rules" && (init?.method ?? "GET") === "GET") {
       return opts.rulesStatus
@@ -70,7 +70,7 @@ describe("ForwardingSettings", () => {
     stubApi({ rules: [rule(), rule({ id: 2, matchLocal: "*", destination: "a@exemple.com" })] });
     render(<ForwardingSettings />, { wrapper });
 
-    expect(await screen.findByText("contact@planigramme.fr")).toBeDefined();
+    expect(await screen.findByText("contact@example.com")).toBeDefined();
     expect(screen.getByText("Toutes les adresses")).toBeDefined();
     expect(screen.getByText("gmail@exemple.com")).toBeDefined();
   });
@@ -146,7 +146,7 @@ describe("ForwardingSettings", () => {
     render(<ForwardingSettings />, { wrapper });
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Supprimer la redirection contact@planigramme.fr" }),
+      await screen.findByRole("button", { name: "Supprimer la redirection contact@example.com" }),
     );
     await waitFor(() => {
       const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
@@ -192,7 +192,7 @@ describe("ForwardingSettings", () => {
     render(<ForwardingSettings />, { wrapper });
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Supprimer la redirection contact@planigramme.fr" }),
+      await screen.findByRole("button", { name: "Supprimer la redirection contact@example.com" }),
     );
     expect(await screen.findByText(/Suppression impossible/)).toBeDefined();
   });
@@ -202,10 +202,10 @@ describe("ForwardingSettings", () => {
     render(<ForwardingSettings />, { wrapper });
 
     expect(
-      await screen.findByRole("switch", { name: "Désactiver la redirection contact@planigramme.fr" }),
+      await screen.findByRole("switch", { name: "Désactiver la redirection contact@example.com" }),
     ).toBeDefined();
     expect(
-      screen.getByRole("switch", { name: "Activer la redirection perso@planigramme.fr" }),
+      screen.getByRole("switch", { name: "Activer la redirection perso@example.com" }),
     ).toBeDefined();
   });
 

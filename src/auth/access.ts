@@ -16,7 +16,30 @@ function jwksFor(teamDomain: string) {
   return set;
 }
 
+// Les trois variables d'identité Access arrivent au Worker sous forme de secrets
+// (voir la mise en service du README) : ALLOWED_EMAILS porte une adresse
+// personnelle et n'a donc rien à faire dans un dépôt public. Un secret non posé
+// vaut `undefined` et non la chaîne vide — sans cette garde, la lecture des
+// adresses autorisées lèverait un TypeError, qui remonterait en « 500 Erreur
+// interne » et ferait chercher un bug là où il n'y a qu'une configuration
+// incomplète. On refuse donc explicitement, et le message dit quoi poser.
+//
+// Le cas ALLOWED_EMAILS vide est traité comme absent, et non comme « aucune
+// adresse autorisée » : les deux refusent tout de toute façon, mais le message
+// oriente vers la bonne cause.
+function requireAccessConfig(env: Env): void {
+  const manquants = (["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "ALLOWED_EMAILS"] as const).filter(
+    (k) => !env[k]?.trim()
+  );
+  if (manquants.length > 0) {
+    throw new Error(
+      `configuration Access incomplète : ${manquants.join(", ")} non posé(s) sur le Worker`
+    );
+  }
+}
+
 export async function verifyAccessJwt(env: Env, token: string): Promise<AccessIdentity> {
+  requireAccessConfig(env);
   const { payload } = await jwtVerify(token, jwksFor(env.ACCESS_TEAM_DOMAIN), {
     issuer: `https://${env.ACCESS_TEAM_DOMAIN}`,
     audience: env.ACCESS_AUD,

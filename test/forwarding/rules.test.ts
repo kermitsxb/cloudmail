@@ -49,20 +49,20 @@ describe("localPart", () => {
 describe("matchingDestinations", () => {
   it("retient la règle nominative", async () => {
     await addRule("contact", "a@exemple.com");
-    const matches = await matchingDestinations(env.DB, "contact@planigramme.fr");
+    const matches = await matchingDestinations(env.DB, "contact@example.com");
     expect(matches).toEqual([{ ruleIds: [expect.any(Number)], destination: "a@exemple.com" }]);
   });
 
   it("retient la règle catch-all pour n'importe quelle adresse", async () => {
     await addRule(CATCH_ALL, "a@exemple.com");
-    const matches = await matchingDestinations(env.DB, "nimportequoi@planigramme.fr");
+    const matches = await matchingDestinations(env.DB, "nimportequoi@example.com");
     expect(matches.map((m) => m.destination)).toEqual(["a@exemple.com"]);
   });
 
   it("cumule règle nominative et catch-all", async () => {
     await addRule(CATCH_ALL, "archive@exemple.com");
     await addRule("thomas", "gmail@exemple.com");
-    const matches = await matchingDestinations(env.DB, "thomas@planigramme.fr");
+    const matches = await matchingDestinations(env.DB, "thomas@example.com");
     expect(matches.map((m) => m.destination).sort()).toEqual([
       "archive@exemple.com",
       "gmail@exemple.com",
@@ -72,14 +72,14 @@ describe("matchingDestinations", () => {
   it("dédoublonne les destinations identiques en conservant les deux règles", async () => {
     await addRule(CATCH_ALL, "gmail@exemple.com");
     await addRule("thomas", "GMAIL@exemple.com");
-    const matches = await matchingDestinations(env.DB, "thomas@planigramme.fr");
+    const matches = await matchingDestinations(env.DB, "thomas@example.com");
     expect(matches).toHaveLength(1);
     expect(matches[0].ruleIds).toHaveLength(2);
   });
 
   it("ignore les règles désactivées", async () => {
     await addRule("thomas", "a@exemple.com", 0);
-    expect(await matchingDestinations(env.DB, "thomas@planigramme.fr")).toEqual([]);
+    expect(await matchingDestinations(env.DB, "thomas@example.com")).toEqual([]);
   });
 
   it("compare la partie locale sans tenir compte de la casse", async () => {

@@ -32,7 +32,7 @@ const withEnv = () => ({
   DEV_BYPASS_AUTH: "1",
   CF_ACCOUNT_ID: "acc",
   CF_ROUTING_TOKEN: "tok",
-  MAIL_DOMAIN: "planigramme.fr",
+  MAIL_DOMAIN: "example.com",
 });
 
 const req = (path: string, init?: RequestInit) =>
@@ -49,7 +49,7 @@ describe("GET /api/config", () => {
   it("expose le domaine de courrier", async () => {
     const res = await req("/api/config");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ mailDomain: "planigramme.fr" });
+    expect(await res.json()).toEqual({ mailDomain: "example.com" });
   });
 });
 

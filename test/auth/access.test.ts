@@ -36,6 +36,43 @@ const token = async (over: { email?: string; aud?: string; exp?: string } = {}) 
     .setExpirationTime(over.exp ?? "1h")
     .sign(priv);
 
+describe("verifyAccessJwt — configuration incomplète", () => {
+  // Ces trois variables arrivent au Worker sous forme de secrets. Un secret non
+  // posé vaut `undefined`, pas la chaîne vide : sans garde, la lecture des
+  // adresses autorisées lèverait un TypeError, qui remonterait en 500 générique
+  // via le gestionnaire d'erreurs global. On veut un refus d'authentification
+  // explicite, parce que la cause est une configuration absente et non un bug.
+  const withoutConfig = (missing: "ACCESS_TEAM_DOMAIN" | "ACCESS_AUD" | "ALLOWED_EMAILS") => {
+    const e = { ...testEnv() } as Record<string, unknown>;
+    delete e[missing];
+    return e as unknown as ReturnType<typeof testEnv>;
+  };
+
+  it("refuse quand ALLOWED_EMAILS n'est pas posé, sans TypeError", async () => {
+    const t = await token();
+    await expect(verifyAccessJwt(withoutConfig("ALLOWED_EMAILS"), t)).rejects.toThrow(
+      /configuration/i
+    );
+  });
+
+  it("refuse quand ACCESS_AUD n'est pas posé", async () => {
+    const t = await token();
+    await expect(verifyAccessJwt(withoutConfig("ACCESS_AUD"), t)).rejects.toThrow(/configuration/i);
+  });
+
+  it("refuse quand ACCESS_TEAM_DOMAIN n'est pas posé", async () => {
+    const t = await token();
+    await expect(verifyAccessJwt(withoutConfig("ACCESS_TEAM_DOMAIN"), t)).rejects.toThrow(
+      /configuration/i
+    );
+  });
+
+  it("refuse quand ALLOWED_EMAILS est vide, sans autoriser tout le monde", async () => {
+    const e = { ...testEnv(), ALLOWED_EMAILS: "" };
+    await expect(verifyAccessJwt(e, await token())).rejects.toThrow(/configuration/i);
+  });
+});
+
 describe("verifyAccessJwt", () => {
   it("accepte un jeton valide et retourne l'email", async () => {
     const id = await verifyAccessJwt(testEnv(), await token());

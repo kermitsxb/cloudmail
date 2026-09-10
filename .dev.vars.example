@@ -14,3 +14,12 @@ DEV_BYPASS_AUTH=1
 CF_ACCOUNT_ID=
 CF_API_TOKEN=
 CF_ROUTING_TOKEN=
+
+# Adresse(s) autorisée(s) à se connecter, séparées par des virgules.
+# En production, posée en secret : pnpm wrangler secret put ALLOWED_EMAILS
+ALLOWED_EMAILS=vous@example.com
+
+# Application Cloudflare Access (src/auth/access.ts).
+# En production, posées en secrets — jamais dans wrangler.jsonc.
+ACCESS_TEAM_DOMAIN=
+ACCESS_AUD=

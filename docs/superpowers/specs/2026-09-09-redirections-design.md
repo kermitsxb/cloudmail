@@ -225,7 +225,7 @@ bascule `App.tsx` vers une vue de réglages. Nouveau composant
 `web/src/components/ForwardingSettings.tsx`, construit sur les primitives `ui/`
 existantes (`dialog`, `input`, `button`, `badge`).
 
-**Liste** — une ligne par règle : source (`contact@planigramme.fr` ou « Toutes les
+**Liste** — une ligne par règle : source (`contact@example.com` ou « Toutes les
 adresses »), destination, interrupteur d'activation, suppression, et un badge de
 statut lorsque la dernière tentative a échoué, portant l'erreur Cloudflare et sa
 date.
@@ -236,7 +236,7 @@ date.
 Nouvelle redirection
 
   ◉ Une adresse
-     [ contact        ]@planigramme.fr
+     [ contact        ]@example.com
   ○ Toutes les adresses du domaine
 
   Vers  [ ── choisir ──            ▾ ]
@@ -256,7 +256,7 @@ le `<select>` est remplacé par le renvoi vers le tableau de bord :
 
 Le domaine affiché à droite du champ de partie locale vient de `MAIL_DOMAIN`,
 lu via la nouvelle route `GET /api/config`. Aucune route n'exposait jusqu'ici la
-configuration du Worker au SPA, et coder `planigramme.fr` en dur dans le front
+configuration du Worker au SPA, et coder `example.com` en dur dans le front
 casserait la neutralité du dépôt vis-à-vis des autres installations.
 
 ## Tests

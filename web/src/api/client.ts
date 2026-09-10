@@ -74,6 +74,10 @@ export const useThreads = (folder: string, q: string) =>
           (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""),
       ),
     getNextPageParam: (last) => last.cursor,
+    // Rafraîchissement silencieux : ne tourne pas onglet en arrière-plan (comportement
+    // par défaut de refetchIntervalInBackground) et ne perturbe pas la pagination déjà
+    // chargée — un refetch d'infinite query recharge toutes les pages obtenues, dans l'ordre.
+    refetchInterval: 30_000,
   });
 
 export const useThread = (id: number | null) =>
