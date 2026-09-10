@@ -96,6 +96,29 @@ export function mergeConfig(base, overrides) {
   return out;
 }
 
+// Champs de wrangler.jsonc qui contiennent un chemin relatif au fichier de
+// configuration lui-même. wrangler.jsonc vit à la racine du dépôt, donc ces
+// chemins y sont écrits relatifs à la racine — mais generated.jsonc est écrit
+// dans .wrangler/, un sous-dossier : sans réécriture, wrangler les résoudrait
+// depuis .wrangler/ et chercherait par exemple .wrangler/src/index.ts, qui
+// n'existe pas. `toAbsolute` reçoit un chemin relatif à la racine et renvoie
+// un chemin absolu, insensible au dossier du fichier de configuration.
+export function resolveRelativePaths(config, toAbsolute) {
+  const out = { ...config };
+  if (typeof out.main === "string") out.main = toAbsolute(out.main);
+  if (isPlainObject(out.assets) && typeof out.assets.directory === "string") {
+    out.assets = { ...out.assets, directory: toAbsolute(out.assets.directory) };
+  }
+  if (Array.isArray(out.d1_databases)) {
+    out.d1_databases = out.d1_databases.map((db) =>
+      isPlainObject(db) && typeof db.migrations_dir === "string"
+        ? { ...db, migrations_dir: toAbsolute(db.migrations_dir) }
+        : db
+    );
+  }
+  return out;
+}
+
 // Chemins des valeurs sentinelles restantes, pour un message d'erreur qui dit
 // quoi renseigner plutôt qu'un simple « configuration invalide ».
 export function findPlaceholders(config, path = "") {
