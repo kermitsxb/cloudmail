@@ -16,7 +16,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findPlaceholders, mergeConfig, stripJsonComments } from "./config-merge.mjs";
+import { findPlaceholders, mergeConfig, resolveRelativePaths, stripJsonComments } from "./config-merge.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = resolve(root, "wrangler.jsonc");
@@ -80,12 +80,17 @@ if (process.argv.includes("--check")) {
   process.exit(0);
 }
 
+// wrangler.jsonc écrit ses chemins relatifs à la racine du dépôt, mais
+// generated.jsonc vit dans .wrangler/ : sans réécriture, wrangler les
+// résoudrait depuis ce sous-dossier (ex. .wrangler/src/index.ts, introuvable).
+const resolved = resolveRelativePaths(merged, (p) => resolve(root, p));
+
 await mkdir(dirname(OUT), { recursive: true });
 await writeFile(
   OUT,
   `// Fichier généré par scripts/config.mjs — ne pas éditer, ne pas versionner.\n` +
     `// Source : wrangler.jsonc + wrangler.overrides.json\n` +
-    `${JSON.stringify(merged, null, 2)}\n`,
+    `${JSON.stringify(resolved, null, 2)}\n`,
   "utf8"
 );
 console.log(`✔ ${OUT.replace(`${root}/`, "")} écrit.`);

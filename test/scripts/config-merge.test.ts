@@ -3,6 +3,7 @@ import {
   PLACEHOLDER_VALUES,
   findPlaceholders,
   mergeConfig,
+  resolveRelativePaths,
   stripJsonComments,
 } from "../../scripts/config-merge.mjs";
 
@@ -79,6 +80,43 @@ describe("mergeConfig", () => {
 
   it("remplace un tableau de scalaires", () => {
     expect(mergeConfig({ flags: ["a", "b"] }, { flags: ["c"] })).toEqual({ flags: ["c"] });
+  });
+});
+
+describe("resolveRelativePaths", () => {
+  // Sans ça, wrangler résoudrait ces chemins depuis .wrangler/ (où vit
+  // generated.jsonc) et ne trouverait ni .wrangler/src/index.ts ni
+  // .wrangler/web/dist.
+  const toAbsolute = (p) => `/repo/${p}`;
+
+  it("rend absolu le point d'entrée", () => {
+    expect(resolveRelativePaths({ main: "src/index.ts" }, toAbsolute).main).toBe("/repo/src/index.ts");
+  });
+
+  it("rend absolu le dossier des assets sans toucher aux autres clés", () => {
+    const out = resolveRelativePaths(
+      { assets: { directory: "./web/dist", binding: "ASSETS" } },
+      toAbsolute
+    );
+    expect(out.assets).toEqual({ directory: "/repo/./web/dist", binding: "ASSETS" });
+  });
+
+  it("rend absolu migrations_dir dans chaque base d1", () => {
+    const out = resolveRelativePaths(
+      { d1_databases: [{ binding: "DB", migrations_dir: "migrations" }] },
+      toAbsolute
+    );
+    expect(out.d1_databases[0]).toEqual({ binding: "DB", migrations_dir: "/repo/migrations" });
+  });
+
+  it("laisse intacte une configuration sans ces clés", () => {
+    expect(resolveRelativePaths({ name: "cloudmail" }, toAbsolute)).toEqual({ name: "cloudmail" });
+  });
+
+  it("ne mute pas la configuration reçue", () => {
+    const base = { main: "src/index.ts" };
+    resolveRelativePaths(base, toAbsolute);
+    expect(base.main).toBe("src/index.ts");
   });
 });
 
