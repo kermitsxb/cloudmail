@@ -59,6 +59,32 @@ jamais aux deux.
 - Cloudflare Access (Zero Trust) doit être disponible sur le compte pour protéger
   le sous-domaine choisi (`mail.example.com` dans les instructions).
 
+## Variables d'environnement
+
+Résumé de tout ce que lit `src/env.ts` (`Env`), toutes requises pour un
+déploiement complet. Chaque ligne renvoie à l'étape de « Mise en service » qui
+détaille comment obtenir la valeur ; ce tableau ne fait que rassembler où
+chacune se pose.
+
+| Variable | Nature | Où la poser en déployé | Où la poser en local | À quoi elle sert | Étape |
+| --- | --- | --- | --- | --- | --- |
+| `CF_ACCOUNT_ID` | secret | `pnpm wrangler secret put CF_ACCOUNT_ID` | `.dev.vars` | Identifie le compte Cloudflare dans l'URL appelée par `src/send/client.ts` (envoi) | 8-9 |
+| `CF_API_TOKEN` | secret | `pnpm wrangler secret put CF_API_TOKEN` | `.dev.vars` | Authentifie l'envoi ; token dédié, permission **Email Sending: Send** uniquement | 8-9 |
+| `CF_ROUTING_TOKEN` | secret | `pnpm wrangler secret put CF_ROUTING_TOKEN` | `.dev.vars` | Authentifie la lecture des destinations vérifiées (`src/forwarding/destinations.ts`) ; token **distinct** du précédent, permission **Email Routing: Read** uniquement | 8-9 |
+| `ACCESS_TEAM_DOMAIN` | var | `wrangler.jsonc` → `vars` | — (non vérifié en local, voir `DEV_BYPASS_AUTH`) | Team domain Cloudflare Access, utilisé par `src/auth/access.ts` pour valider le JWT | 7 |
+| `ACCESS_AUD` | var | `wrangler.jsonc` → `vars` | — | Audience (AUD) de l'application Access, même vérification JWT | 7 |
+| `ALLOWED_EMAILS` | var | `wrangler.jsonc` → `vars` | — | Adresse(s) autorisée(s) à se connecter (doublon applicatif de la politique Access) | 7 |
+| `MAIL_DOMAIN` | var | `wrangler.jsonc` → `vars` | — | Domaine utilisé pour générer le `Message-ID` des emails envoyés (`src/api/routes.ts`) | 5 |
+| `DEV_BYPASS_AUTH` | var, **local uniquement** | jamais posée en déployé | `.dev.vars` (`=1`) | Désactive la vérification Access pour le développement local ; voir l'avertissement dans `.dev.vars.example` | Développement local |
+
+Les secrets (`CF_*`) sont posés une fois par `wrangler secret put` et ne sont
+jamais lisibles a posteriori — pour les changer, il faut reposer la commande.
+Les vars (`ACCESS_*`, `ALLOWED_EMAILS`, `MAIL_DOMAIN`) sont en clair dans
+`wrangler.jsonc` et versionnées avec ce dépôt : voir l'avertissement de
+« Prérequis Cloudflare » sur les trois valeurs à remplacer avant tout
+déploiement. Les bindings `DB` (D1), `MAIL` (R2) et `ASSETS` ne sont pas des
+variables mais des ressources déclarées dans `wrangler.jsonc` (étape 1).
+
 ## Commandes de développement
 
 Telles que définies dans `package.json` :
