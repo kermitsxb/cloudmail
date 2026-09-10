@@ -7,7 +7,10 @@
   "scripts": {
     "dev": "concurrently \"pnpm wrangler dev\" \"pnpm --filter web dev\"",
     "build": "pnpm --filter web build",
-    "deploy": "pnpm build && pnpm wrangler deploy",
+    "config": "node scripts/config.mjs",
+    "config:check": "node scripts/config.mjs --check",
+    "deploy": "node scripts/config.mjs && pnpm build && pnpm wrangler deploy -c .wrangler/generated.jsonc",
+    "migrate:remote": "node scripts/config.mjs && pnpm wrangler d1 migrations apply cloudmail --remote -c .wrangler/generated.jsonc",
     "test": "vitest run && pnpm --filter web test",
     "typecheck": "tsc --noEmit"
   },
