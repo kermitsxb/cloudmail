@@ -14,7 +14,7 @@ function Mailbox() {
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [view, setView] = useState<"mail" | "forwarding">("mail");
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useThreads(folder, query);
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, refetch, isRefetching } = useThreads(folder, query);
   const threads = data?.pages.flatMap((p) => p.threads) ?? [];
 
   const handleSelectFolder = (next: string) => {
@@ -34,7 +34,7 @@ function Mailbox() {
       ) : (
         <>
           <div className={`flex flex-col border-r border-border ${selectedThreadId !== null ? "hidden lg:flex" : "flex"}`}>
-            <div className="border-b border-border p-3">
+            <div className="flex items-center gap-2 border-b border-border p-3">
               <input
                 type="search"
                 value={query}
@@ -43,6 +43,18 @@ function Mailbox() {
                 aria-label="Rechercher dans les conversations"
                 className="w-full rounded border border-border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground"
               />
+              <button
+                type="button"
+                onClick={() => refetch()}
+                disabled={isRefetching}
+                aria-label="Rafraîchir la liste des conversations"
+                title="Rafraîchir"
+                className="shrink-0 rounded border border-border p-2 text-sm hover:bg-accent disabled:opacity-50"
+              >
+                <span aria-hidden="true" className={isRefetching ? "inline-block animate-spin" : "inline-block"}>
+                  ⟳
+                </span>
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto">
               <ThreadList

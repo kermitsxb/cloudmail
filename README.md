@@ -38,21 +38,81 @@ qu'un message arrive à la fois dans Cloudmail et dans une boîte externe :
 Cloudflare Email Routing ne sait livrer qu'à un Worker **ou** à une adresse,
 jamais aux deux.
 
+## Ne jamais versionner de valeur propre à votre installation
+
+Cloudmail est destiné à être cloné puis déployé par d'autres personnes. Une
+valeur qui décrit **une** installation n'a donc pas sa place dans le dépôt, même
+lorsqu'elle n'est pas secrète. Le critère n'est pas « est-ce confidentiel ? »
+mais **« est-ce que cette valeur change d'une installation à l'autre ? »**.
+
+Un exemple qui illustre la nuance : le team domain Cloudflare Access et
+l'Application Audience (AUD) de votre application sont **publics** — Cloudflare
+les sert à n'importe quel visiteur anonyme dans la redirection vers la page de
+connexion, on les lit dans un simple `curl -I`. Ils ne doivent pourtant pas être
+versionnés, parce qu'ils désignent votre installation et personne d'autre.
+
+Sont concernés : adresses email, domaines et sous-domaines, identifiants de
+compte, de base D1, de bucket R2 ou de zone DNS, team domain et AUD Access, et
+bien sûr tout jeton ou clé.
+
+**Où les mettre.** Toute valeur lue par le Worker via `env` se pose en secret,
+qui ne transite jamais par git :
+
+```bash
+pnpm wrangler secret put ACCESS_TEAM_DOMAIN
+pnpm wrangler secret put ACCESS_AUD
+pnpm wrangler secret put ALLOWED_EMAILS
+```
+
+En développement local, copiez `.dev.vars.example` vers `.dev.vars` (ignoré par
+git) et renseignez-y les mêmes variables. Si l'une manque en production,
+`requireAccessConfig()` (`src/auth/access.ts`) refuse toute requête avec un
+message qui la nomme, au lieu de laisser passer une erreur interne opaque.
+
+Dans les tests et la documentation, n'utilisez que des valeurs d'exemple neutres
+(`vous@example.com`, `example.com`) — jamais une adresse ou un domaine réel.
+
+**Pour ce qui n'est pas lu via `env`.** Une route et un `database_id` sont de la
+configuration de déploiement : Wrangler les lit dans son fichier de config, ils
+ne peuvent donc pas être des secrets. Le fichier versionné `wrangler.jsonc` n'en
+porte que des placeholders — `mail.example.com`, `"local"`, `example.com` — et vos
+valeurs réelles vivent dans un `wrangler.overrides.json` à la racine, ignoré par
+git :
+
+```json
+{
+  "routes": [{ "pattern": "mail.votredomaine.fr", "custom_domain": true }],
+  "d1_databases": [{ "database_id": "<id affiché par wrangler d1 create>" }],
+  "vars": { "MAIL_DOMAIN": "votredomaine.fr" }
+}
+```
+
+`scripts/config.mjs` fusionne les deux vers `.wrangler/generated.jsonc`, que les
+commandes de déploiement utilisent via `-c`. `pnpm run deploy` et
+`pnpm run migrate:remote` s'en occupent seuls ; `pnpm run config:check` vérifie
+sans rien écrire.
+
+Deux conséquences voulues de cette conception :
+
+- **un clone neuf fonctionne sans préparation** — les placeholders sont
+  structurellement valides, donc `pnpm test` et `pnpm dev` tournent
+  immédiatement, Miniflare simulant D1 et R2 sans authentification ;
+- **il est impossible de déployer par accident avec les placeholders** —
+  `scripts/config.mjs` refuse et nomme chaque valeur manquante, plutôt que
+  d'envoyer votre Worker sur un domaine et une base qui ne vous appartiennent
+  pas.
+
+Les overrides ne remplacent que ce qu'ils mentionnent, et la fusion des tableaux
+se fait élément par élément : n'indiquer que `database_id` conserve le binding,
+le nom de base et le dossier de migrations décrits par le fichier versionné.
+
 ## Prérequis Cloudflare
 
 - Un domaine à vous (ex. `example.com`) doit être géré sur Cloudflare (zone DNS
   active). Les instructions ci-dessous utilisent `example.com` et le
-  sous-domaine `mail.example.com` comme exemples : remplacez-les par votre
-  propre domaine partout où ils apparaissent (`wrangler.jsonc`, tableau de bord
-  Cloudflare).
-- **`wrangler.jsonc` est versionné avec la configuration de l'instance de ce
-  dépôt**, pas avec des placeholders : la route `mail.example.com`, le
-  `database_id` de sa base D1 et son `MAIL_DOMAIN` sont des valeurs réelles.
-  Rien de secret n'y figure (un `database_id` n'est pas un identifiant
-  d'authentification, et les secrets vivent dans `wrangler secret`), mais aucune
-  de ces valeurs ne vous concerne : remplacez les trois par les vôtres avant tout
-  déploiement, sinon `wrangler deploy` réclamera une zone et une base que votre
-  compte ne possède pas.
+  sous-domaine `mail.example.com` comme exemples : vos valeurs réelles vont dans
+  `wrangler.overrides.json` et dans les secrets, jamais dans un fichier versionné
+  (voir la section précédente).
 - Un plan **Workers Paid** est nécessaire pour utiliser Email Sending (l'API
   d'envoi utilisée par `src/send/client.ts`). Email Routing, utilisé pour la
   réception, est gratuit et ne nécessite pas ce plan.
@@ -70,11 +130,18 @@ Telles que définies dans `package.json` :
   auth, envoi, redirections) puis `pnpm --filter web test` (51 tests côté SPA).
 - `pnpm build` — construit uniquement le SPA (`pnpm --filter web build`), dont la
   sortie (`web/dist`) est servie par le Worker via le binding `ASSETS`.
-- `pnpm run deploy` — enchaîne `pnpm build` puis `pnpm wrangler deploy` :
-  reconstruit le SPA puis déploie le Worker (code + assets) sur Cloudflare. Le
-  `run` n'est pas optionnel ici : dans un workspace pnpm, `deploy` est une
-  commande native de pnpm, et `pnpm deploy` échoue donc avec
-  `ERR_PNPM_NOTHING_TO_DEPLOY` sans jamais lancer le script.
+- `pnpm run deploy` — génère la configuration de déploiement
+  (`scripts/config.mjs`), reconstruit le SPA, puis déploie le Worker (code +
+  assets) sur Cloudflare avec cette configuration. Le `run` n'est pas optionnel
+  ici : dans un workspace pnpm, `deploy` est une commande native de pnpm, et
+  `pnpm deploy` échoue donc avec `ERR_PNPM_NOTHING_TO_DEPLOY` sans jamais lancer
+  le script.
+- `pnpm run config` — écrit `.wrangler/generated.jsonc` en fusionnant
+  `wrangler.jsonc` et `wrangler.overrides.json`. `pnpm run config:check` fait la
+  même vérification sans rien écrire, utile pour s'assurer qu'une installation est
+  complète avant de déployer.
+- `pnpm run migrate:remote` — applique les migrations D1 sur la base distante avec
+  la configuration générée.
 - `pnpm typecheck` — `tsc --noEmit`, non demandé par le brief mais utile en
   local.
 
@@ -109,34 +176,43 @@ pnpm wrangler d1 create cloudmail
 pnpm wrangler r2 bucket create cloudmail
 ```
 
-La commande `d1 create` affiche un `database_id`. Reporter cette valeur dans
-`wrangler.jsonc`, à la place de celle qui y figure — celle de la base de
-l'instance de ce dépôt, sur un autre compte que le vôtre :
+La commande `d1 create` affiche un `database_id`. Créer alors, à la racine du
+dépôt, un `wrangler.overrides.json` — ignoré par git — portant vos trois valeurs
+de déploiement :
 
-```jsonc
-"d1_databases": [
-  {
-    "binding": "DB",
-    "database_name": "cloudmail",
-    "database_id": "REMPLACER_PAR_VOTRE_ID",
-    "migrations_dir": "migrations"
-  }
-]
+```json
+{
+  "routes": [{ "pattern": "mail.example.com", "custom_domain": true }],
+  "d1_databases": [{ "database_id": "REMPLACER_PAR_VOTRE_ID" }],
+  "vars": { "MAIL_DOMAIN": "example.com" }
+}
 ```
 
-Profiter du même passage pour remplacer la route `mail.example.com` par votre
-propre sous-domaine, et `vars.MAIL_DOMAIN` par votre domaine (celui de l'étape
-5). Si cette étape est oubliée, `wrangler deploy` échoue : votre compte n'a ni
-cette zone ni cette base D1, et le Worker déployé n'aurait de toute façon pas de
-base de données fonctionnelle. Ces valeurs ne servent qu'au distant : en local,
-`wrangler dev` et les tests Vitest ne les lisent pas, Miniflare simulant D1 et R2
-sans authentification Cloudflare — voir le commentaire dans `wrangler.jsonc`.
+En remplaçant `mail.example.com` par votre propre sous-domaine et `example.com`
+par votre domaine (celui de l'étape 5). Rien d'autre n'est nécessaire : les
+overrides ne mentionnent que ce qui diffère, la fusion conservant le binding, le
+nom de base et le dossier de migrations décrits par `wrangler.jsonc`.
+
+Si cette étape est oubliée, rien ne part sur votre compte : `scripts/config.mjs`
+refuse de produire une configuration contenant encore les valeurs d'exemple, et
+nomme celles qui manquent. C'est délibéré — déployer avec les placeholders
+enverrait le Worker sur un domaine et une base qui ne sont pas les vôtres.
+
+Ces valeurs ne servent qu'au distant : en local, `wrangler dev` et les tests
+Vitest lisent `wrangler.jsonc` avec ses placeholders, Miniflare simulant D1 et R2
+sans authentification Cloudflare. C'est ce qui permet à un clone neuf de lancer
+`pnpm test` et `pnpm dev` sans aucune préparation.
 
 ### 2. Appliquer les migrations en distant
 
 ```bash
-pnpm wrangler d1 migrations apply cloudmail --remote
+pnpm run migrate:remote
 ```
+
+Ce script génère la configuration de déploiement puis lance
+`wrangler d1 migrations apply cloudmail --remote -c .wrangler/generated.jsonc`.
+Le `-c` n'est pas décoratif : sans lui, Wrangler lirait le `database_id`
+placeholder `"local"` du fichier versionné au lieu de votre base réelle.
 
 Cette étape applique **toutes** les migrations du dossier `migrations/` : les
 tables (`identities`, `threads`, `messages`, ...) de `0001_initial.sql`, puis la
@@ -159,7 +235,7 @@ absente, et le reste jusqu'à ce que la migration soit appliquée.
 ### 3. Peupler la table `identities`
 
 ```bash
-pnpm wrangler d1 execute cloudmail --remote --command \
+pnpm wrangler d1 execute cloudmail --remote -c .wrangler/generated.jsonc --command \
   "INSERT INTO identities (address, display_name, is_default) VALUES ('vous@example.com', 'Votre Nom', 1)"
 ```
 
@@ -401,7 +477,7 @@ son propre cycle de conception, pas un ajout de dernière minute).
 **1. Extraire les clés connues de D1.**
 
 ```bash
-pnpm wrangler d1 execute cloudmail --remote --json \
+pnpm wrangler d1 execute cloudmail --remote -c .wrangler/generated.jsonc --json \
   --command "SELECT raw_key FROM messages ORDER BY raw_key" \
   | jq -r '.[0].results[].raw_key' | sort > d1-raw-keys.txt
 ```

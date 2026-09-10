@@ -3,3 +3,8 @@ node_modules
 dist
 .wrangler
 .dev.vars
+.DS_Store
+
+# Valeurs propres à votre installation, appliquées au déploiement par
+# scripts/config.mjs (voir le README). Jamais versionné.
+wrangler.overrides.json

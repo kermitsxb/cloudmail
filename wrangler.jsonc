@@ -5,8 +5,10 @@
   "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  // Sous-domaine sur lequel Cloudmail est exposé (voir la section « Mise en service »
-  // du README). Ce domaine doit être géré sur le compte Cloudflare qui héberge le Worker.
+  // Placeholder. Le sous-domaine réel n'est PAS versionné : il vit dans
+  // wrangler.overrides.json (ignoré par git), appliqué au déploiement par
+  // scripts/config.mjs. Voir « Ne jamais versionner de valeur propre à votre
+  // installation » dans le README.
   "routes": [{ "pattern": "mail.example.com", "custom_domain": true }],
   "assets": {
     "directory": "./web/dist",
@@ -18,9 +20,10 @@
     {
       "binding": "DB",
       "database_name": "cloudmail",
-      // Identifiant de la base D1 distante (créée à l'étape 1 de la section « Mise en
-      // service » du README). En local, `wrangler dev` et les tests Vitest n'utilisent pas
-      // cette valeur : Miniflare simule D1 et R2 sans authentification Cloudflare.
+      // Placeholder : "local" suffit en développement, où Miniflare simule D1 et R2
+      // sans authentification Cloudflare — c'est ce qui permet à `pnpm test` et
+      // `pnpm dev` de fonctionner sur un clone neuf sans préparation. L'identifiant
+      // réel de la base distante vit dans wrangler.overrides.json (ignoré par git).
       "database_id": "local",
       "migrations_dir": "migrations"
     }
@@ -29,12 +32,19 @@
     { "binding": "MAIL", "bucket_name": "cloudmail" }
   ],
   "vars": {
-    "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": "",
-    "ALLOWED_EMAILS": "",
+    // ACCESS_TEAM_DOMAIN, ACCESS_AUD et ALLOWED_EMAILS sont délibérément absents
+    // de ce fichier : ce sont des valeurs propres à une installation, et ce dépôt
+    // est destiné à être cloné et réutilisé. Elles se posent en secrets, qui ne
+    // transitent jamais par git :
+    //   pnpm wrangler secret put ACCESS_TEAM_DOMAIN
+    //   pnpm wrangler secret put ACCESS_AUD
+    //   pnpm wrangler secret put ALLOWED_EMAILS
+    // En développement local, .dev.vars (ignoré par git) les fournit. Si l'une
+    // manque, requireAccessConfig() dans src/auth/access.ts refuse toute requête
+    // avec un message qui la nomme, plutôt qu'une erreur interne opaque.
     // Domaine utilisé pour générer le Message-ID des emails envoyés (voir
-    // src/api/routes.ts). Doit correspondre au domaine géré à l'étape 5 de la
-    // section « Mise en service » du README (Email Service / Sending).
+    // src/api/routes.ts). Placeholder ici ; le domaine réel vit dans
+    // wrangler.overrides.json (ignoré par git).
     "MAIL_DOMAIN": "example.com"
   }
 }
