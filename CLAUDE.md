@@ -1,81 +1,80 @@
-# Cloudmail — instructions projet
+# Cloudmail — project instructions
 
-## Ne jamais committer de valeur propre à une installation
+## Never commit a value specific to one installation
 
-Ce dépôt est open source et destiné à être cloné puis déployé par d'autres
-personnes. Une valeur qui décrit **une** installation n'y a donc pas sa place,
-même lorsqu'elle n'est pas secrète : elle force chaque personne qui reprend le
-projet à deviner ce qui est un exemple et ce qui est la configuration de
-quelqu'un d'autre, et elle finit par être déployée par erreur.
+This repository is open source and meant to be cloned and deployed by other
+people. A value that describes **one** installation therefore has no place in
+it, even when it isn't secret: it forces anyone picking up the project to
+guess what's an example and what's someone else's configuration, and it ends
+up deployed by mistake.
 
-Le critère n'est pas « est-ce confidentiel ? » mais **« est-ce que la valeur
-change d'une installation à l'autre ? »**. Un team domain Cloudflare Access et
-un AUD d'application sont publics — Cloudflare les sert à tout visiteur anonyme
-dans la redirection vers la page de connexion — et ils ne doivent pourtant pas
-être versionnés, parce qu'ils désignent une installation précise.
+The criterion isn't "is it confidential?" but **"does this value change from
+one installation to another?"**. A Cloudflare Access team domain and an
+application AUD are public — Cloudflare serves them to any anonymous visitor
+in the redirect to the login page — yet they must not be versioned, because
+they identify one specific installation.
 
-Sont concernés, sans être exhaustif :
+This includes, non-exhaustively:
 
-- adresses email, noms de domaine, sous-domaines
-- identifiants de compte, de base D1, de bucket R2, de zone DNS
-- team domain et Application Audience (AUD) Cloudflare Access
-- jetons d'API, clés, mots de passe — évidemment, mais ce sont les cas faciles
+- email addresses, domain names, subdomains
+- account, D1 database, R2 bucket, DNS zone identifiers
+- Cloudflare Access team domain and Application Audience (AUD)
+- API tokens, keys, passwords — obviously, but those are the easy cases
 
-**Où les mettre à la place.** Toute valeur lue par le Worker via `env` se pose
-en secret, qui ne transite jamais par git :
+**Where to put them instead.** Any value read by the Worker via `env` belongs
+as a secret, which never goes through git:
 
 ```bash
-pnpm wrangler secret put NOM_DE_LA_VARIABLE
+pnpm wrangler secret put VARIABLE_NAME
 ```
 
-En développement local, `.dev.vars` (ignoré par git) les fournit ; `.dev.vars.example`
-documente lesquelles sont attendues, avec des valeurs vides ou d'exemple.
+In local development, `.dev.vars` (gitignored) supplies them; `.dev.vars.example`
+documents which ones are expected, with empty or example values.
 
-**Si le code lit une valeur qui peut manquer**, il doit refuser explicitement en
-nommant ce qui n'est pas posé, et non planter. Voir `requireAccessConfig()` dans
-`src/auth/access.ts` : un secret absent donne un refus d'authentification dont le
-message désigne la variable, plutôt qu'un `TypeError` remonté en « 500 Erreur
-interne » qui fait chercher un bug là où il n'y a qu'une configuration
-incomplète.
+**If the code reads a value that may be missing**, it must explicitly refuse by
+naming what wasn't set, rather than crash. See `requireAccessConfig()` in
+`src/auth/access.ts`: a missing secret produces an authentication refusal
+whose message names the variable, instead of a `TypeError` surfacing as a
+"500 Internal Error" that sends you looking for a bug where there's only
+incomplete configuration.
 
-**Dans les tests et la documentation**, utiliser des valeurs d'exemple neutres
-(`vous@example.com`, `example.com`) et jamais une adresse ou un domaine réel.
+**In tests and documentation**, use neutral example values (`you@example.com`,
+`example.com`) and never a real address or domain.
 
-## Deux suites de tests, à ne pas mélanger
+## Two test suites, don't mix them
 
-- `pnpm vitest run` à la racine : le Worker, dans le runtime Workers (Miniflare
-  fournit D1 et R2). 18 fichiers.
-- `pnpm --filter web test` : le SPA, en jsdom. 7 fichiers.
+- `pnpm vitest run` at the root: the Worker, in the Workers runtime (Miniflare
+  provides D1 and R2). 18 files.
+- `pnpm --filter web test`: the SPA, in jsdom. 7 files.
 
-`pnpm test` enchaîne les deux. `pnpm typecheck` ne couvre que le Worker :
-seul `pnpm build` typecheck le SPA (`tsc -b`), donc une erreur de typage dans
-`web/` ne se voit qu'au build.
+`pnpm test` runs both in sequence. `pnpm typecheck` only covers the Worker:
+only `pnpm build` typechecks the SPA (`tsc -b`), so a typing error in `web/`
+only shows up at build time.
 
-## Configuration de déploiement
+## Deployment configuration
 
-`wrangler.jsonc` est versionné avec des **placeholders structurellement valides**
-(`mail.example.com`, `"local"`, `example.com`), ce qui permet à `pnpm test` et
-`pnpm dev` de fonctionner sur un clone neuf sans préparation. Les valeurs réelles
-vivent dans `wrangler.overrides.json` (ignoré par git) et sont fusionnées par
-`scripts/config.mjs` vers `.wrangler/generated.jsonc`, utilisé par les commandes
-distantes via `-c`.
+`wrangler.jsonc` is versioned with **structurally valid placeholders**
+(`mail.example.com`, `"local"`, `example.com`), which lets `pnpm test` and
+`pnpm dev` work on a fresh clone with no setup. Real values live in
+`wrangler.overrides.json` (gitignored) and are merged by `scripts/config.mjs`
+into `.wrangler/generated.jsonc`, used by remote commands via `-c`.
 
-Ne jamais écrire de valeur réelle dans `wrangler.jsonc`. Toute commande Wrangler
-qui touche le distant (`deploy`, `d1 ... --remote`) doit passer par
-`.wrangler/generated.jsonc`, sinon elle viserait le `database_id` placeholder.
-La logique pure de fusion vit dans `scripts/config-merge.mjs` et est testée dans
-`test/scripts/config-merge.test.ts` ; `scripts/config.mjs` n'en est que la
-coquille d'entrée/sortie.
+Never write a real value into `wrangler.jsonc`. Any Wrangler command that
+touches the remote (`deploy`, `d1 ... --remote`) must go through
+`.wrangler/generated.jsonc`, otherwise it would target the placeholder
+`database_id`. The pure merge logic lives in `scripts/config-merge.mjs` and is
+tested in `test/scripts/config-merge.test.ts`; `scripts/config.mjs` is only
+its input/output shell.
 
-## Déploiement
+## Deployment
 
-`pnpm run deploy`, et non `pnpm deploy` : dans un workspace pnpm, `deploy` est
-une commande native de pnpm qui masque le script et échoue avec
-`ERR_PNPM_NOTHING_TO_DEPLOY` sans rien lancer.
+`pnpm run deploy`, not `pnpm deploy`: in a pnpm workspace, `deploy` is a
+native pnpm command that shadows the script and fails with
+`ERR_PNPM_NOTHING_TO_DEPLOY` without running anything.
 
-## Invariant du handler `email()`
+## Invariant of the `email()` handler
 
-`src/email.ts` ne doit jamais appeler `setReject()` — un rejet renverrait un
-bounce à l'expéditeur. Un échec de redirection ne doit jamais empêcher
-l'archivage, et le forward précède la lecture de `message.raw`, qui est un
-`ReadableStream` à usage unique. Voir le paragraphe « Architecture » du README.
+`src/email.ts` must never call `setReject()` — a rejection would bounce back
+to the sender. A forwarding failure must never prevent archiving, and the
+forward happens before reading `message.raw`, which is a single-use
+`ReadableStream`. See the "Architecture" section of the README.
