@@ -313,3 +313,10 @@ Found a bug or have a question? [Open an issue](https://github.com/kermitsxb/clo
 ## Project status
 
 Actively developed and used as a personal mailbox.
+
+## License
+
+Cloudmail is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+You're free to use, modify and self-host it; if you run a modified version as a
+service others can reach over a network, you must make your modified source
+code available to them under the same license.
