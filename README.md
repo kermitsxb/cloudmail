@@ -292,6 +292,14 @@ it.
 - An admin entry point for re-importing messages, instead of a temporary route
 - Automatic cleanup of the empty thread left behind when a message that was
   alone in its thread is re-imported
+- Continuous integration running `pnpm test` and `pnpm build` on every pull
+  request, and an English translation of the interface (it is currently
+  French-only)
+- Scheduled maintenance: automatic emptying of the trash after a set number of
+  days, and a periodic check that counts messages stored in R2 but missing from
+  the app, so lost mail is detected without the manual procedure above
+- SPF/DKIM/DMARC results shown on each message, with a warning on likely
+  spoofing, and a Spam folder
 
 ## Contributing
 
