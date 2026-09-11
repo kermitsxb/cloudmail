@@ -4,6 +4,8 @@ Client webmail personnel, exécuté entièrement sur un Worker Cloudflare unique
 Chaque installation le configure avec son propre domaine et ses propres
 identités d'envoi (voir « Mise en service » ci-dessous).
 
+![Capture d'écran de Cloudmail](assets/img/screenshot.jpg)
+
 ## Architecture
 
 Cloudmail tient dans un seul Worker Cloudflare qui porte trois rôles à la fois :
