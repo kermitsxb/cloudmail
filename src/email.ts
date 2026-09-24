@@ -117,13 +117,10 @@ export async function reparse(env: Env, rawKey: string, envelopeFrom: string): P
   //
   // Écart par rapport au brief : celui-ci se contentait d'un
   // `DELETE FROM messages WHERE message_id = ?` suivi d'un rappel de
-  // storeIncoming. Or storeIncoming incrémente inconditionnellement
-  // message_count/unread_count du thread à chaque insertion — un simple
-  // DELETE laisse ces compteurs déjà incrémentés par l'ingestion d'origine,
-  // et le rappel de storeIncoming les incrémente une seconde fois : rejouer
-  // un message une fois suffit à gonfler durablement ses compteurs de
-  // thread. On compense donc ici en décrémentant le thread concerné avant
-  // suppression, symétriquement à ce que storeIncoming va réappliquer.
+  // storeIncoming. Or un simple DELETE laisse les compteurs du thread
+  // inchangés : la réinsertion compterait deux fois un message hors corbeille.
+  // On retire donc sa contribution avant la suppression ; storeIncoming
+  // réapplique ensuite les compteurs selon son dossier et son état lu.
   const existing = await env.DB.prepare(
     "SELECT id, thread_id, folder, is_read FROM messages WHERE message_id = ?"
   ).bind(parsed.messageId).first<{
