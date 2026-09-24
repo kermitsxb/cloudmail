@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 import { parseEmail } from "./ingest/parse";
-import { storeIncoming } from "./ingest/store";
+import { storeIncoming, type IncomingState } from "./ingest/store";
 import { matchingDestinations, recordAttempts, type AttemptResult } from "./forwarding/rules";
 
 // Borne de temps d'un appel à `message.forward()`. Elle n'existe pas pour la
@@ -125,20 +125,45 @@ export async function reparse(env: Env, rawKey: string, envelopeFrom: string): P
   // thread. On compense donc ici en décrémentant le thread concerné avant
   // suppression, symétriquement à ce que storeIncoming va réappliquer.
   const existing = await env.DB.prepare(
-    "SELECT id, thread_id, is_read FROM messages WHERE message_id = ?"
-  ).bind(parsed.messageId).first<{ id: number; thread_id: number; is_read: number }>();
+    "SELECT id, thread_id, folder, is_read FROM messages WHERE message_id = ?"
+  ).bind(parsed.messageId).first<{
+    id: number;
+    thread_id: number;
+    folder: IncomingState["folder"];
+    is_read: number;
+  }>();
 
   if (existing) {
-    await env.DB.batch([
-      env.DB.prepare(
-        `UPDATE threads
-           SET message_count = MAX(0, message_count - 1),
-               unread_count = MAX(0, unread_count - ?)
-         WHERE id = ?`
-      ).bind(existing.is_read ? 0 : 1, existing.thread_id),
+    const statements = [
       env.DB.prepare("DELETE FROM messages WHERE id = ?").bind(existing.id),
-    ]);
+      // Le message était peut-être seul dans son thread. storeIncoming ne le retrouvera pas
+      // (le rattrapage par sujet joint sur messages, un thread vide n'y répond jamais) et en
+      // créera un nouveau : on supprime donc l'ancien s'il est resté vide.
+      env.DB.prepare(
+        "DELETE FROM threads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = ?)"
+      ).bind(existing.thread_id, existing.thread_id),
+    ];
+    // Un message à la corbeille n'est pas compté dans son thread (voir moveToFolder) :
+    // décrémenter ici sous-compterait les autres messages du thread.
+    if (existing.folder !== "trash") {
+      statements.unshift(
+        env.DB.prepare(
+          `UPDATE threads
+             SET message_count = MAX(0, message_count - 1),
+                 unread_count = MAX(0, unread_count - ?)
+           WHERE id = ?`
+        ).bind(existing.is_read ? 0 : 1, existing.thread_id)
+      );
+    }
+    await env.DB.batch(statements);
   }
 
-  await storeIncoming(env, raw, { from: envelopeFrom, to: "" });
+  // Le rejeu conserve le dossier et l'état lu de la ligne remplacée ; un orphelin (aucune
+  // ligne) est inséré comme un message neuf.
+  await storeIncoming(
+    env,
+    raw,
+    { from: envelopeFrom, to: "" },
+    existing ? { folder: existing.folder, isRead: Boolean(existing.is_read) } : undefined,
+  );
 }
