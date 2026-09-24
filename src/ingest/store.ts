@@ -35,10 +35,17 @@ const sha256Hex = async (data: ArrayBuffer): Promise<string> => {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 };
 
+// État d'un message à l'insertion. Un message reçu arrive non lu dans la boîte de réception ;
+// reparse passe l'état de la ligne qu'il remplace pour que le rejeu ne le perde pas.
+export type IncomingState = { folder: "inbox" | "sent" | "trash"; isRead: boolean };
+
+const NEW_MESSAGE: IncomingState = { folder: "inbox", isRead: false };
+
 export async function storeIncoming(
   env: Env,
   raw: ArrayBuffer,
   envelope: { from: string; to: string },
+  state: IncomingState = NEW_MESSAGE,
 ): Promise<StoreResult> {
   // La clé est dérivée du brut lui-même (SHA-256 des octets), pas du message
   // parsé : l'écriture R2 précède ainsi structurellement tout appel à
@@ -78,11 +85,11 @@ export async function storeIncoming(
        (thread_id, message_id, in_reply_to, direction, folder, from_addr, from_name,
         subject, text_body, html_body, snippet, received_at, is_read, has_attachments, raw_key,
         parse_error, body_truncated)
-     VALUES (?, ?, ?, 'in', 'inbox', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, 'in', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
-    threadId, msg.messageId, msg.inReplyTo, msg.from.address, msg.from.name,
+    threadId, msg.messageId, msg.inReplyTo, state.folder, msg.from.address, msg.from.name,
     msg.subject, text.value, html.value, snippetOf(msg.text || msg.subject),
-    msg.date, msg.attachments.length > 0 ? 1 : 0, rawKey, msg.parseError ? 1 : 0,
+    msg.date, state.isRead ? 1 : 0, msg.attachments.length > 0 ? 1 : 0, rawKey, msg.parseError ? 1 : 0,
     text.truncated || html.truncated ? 1 : 0
   ).run();
 
@@ -124,14 +131,17 @@ export async function storeIncoming(
     );
   }
 
+  // message_count et unread_count ne comptent que les messages hors corbeille (voir
+  // moveToFolder) : un message rejoué directement à la corbeille ne les fait pas varier.
+  const counted = state.folder !== "trash";
   statements.push(
     env.DB.prepare(
       `UPDATE threads
-         SET message_count = message_count + 1,
-             unread_count = unread_count + 1,
+         SET message_count = message_count + ?,
+             unread_count = unread_count + ?,
              last_message_at = MAX(last_message_at, ?)
        WHERE id = ?`
-    ).bind(msg.date, threadId)
+    ).bind(counted ? 1 : 0, counted && !state.isRead ? 1 : 0, msg.date, threadId)
   );
 
   await env.DB.batch(statements);

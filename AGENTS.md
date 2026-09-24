@@ -105,10 +105,20 @@ reverse index, and `wrangler r2 object` has no listing subcommand (only `get`,
 ## Replaying a message (`reparse`)
 
 `reparse(env, rawKey, envelopeFrom)` in `src/email.ts` re-reads a stored raw
-MIME, re-parses it, deletes the existing D1 row (decrementing the thread's
-counters) and calls `storeIncoming` as if the message had just arrived. It also
-works on an orphan (no row to delete). Use it after a parser fix.
+MIME, re-parses it, deletes the existing D1 row and calls `storeIncoming` as
+if the message had just arrived. It also works on an orphan (no row to delete,
+inserted as a new unread inbox message). Use it after a parser fix.
 
+- **It keeps the message's folder and read state**: they are passed to
+  `storeIncoming` as `state`. Thread counters only count messages outside the
+  trash, so a trashed message is neither decremented on delete nor counted on
+  re-insert — same rule as `moveToFolder` and `purgeMessage`.
+- **It deletes the old thread if it ends up empty**, in the same batch as the
+  row delete. Threading uses the normalized subject and reference headers, not
+  the old `thread_id`, and subject matching joins on `messages`, so an empty
+  thread is never picked again: without this, a message alone in its thread
+  left an empty thread behind. SQLite may reuse the deleted thread's id for the
+  new one (no `AUTOINCREMENT`) — don't rely on ids to tell them apart.
 - **It does not replay forwarding** — external recipients already got their
   copy; re-forwarding would send a duplicate.
 - **It has no entry point**: no route, script or command calls it. To use it,
@@ -117,10 +127,6 @@ works on an orphan (no row to delete). Use it after a parser fix.
   remote D1/R2 rather than Miniflare, trigger it, then **remove the route
   before committing**. Never deploy such a route: it's a destructive
   delete-then-reinsert with no safeguard beyond generic Access auth.
-- **Known limitation**: if the replayed message was alone in its thread,
-  `storeIncoming` creates a new thread (threading uses the normalized subject
-  and reference headers, not the old `thread_id`) and the old, now-empty
-  thread is left orphaned in D1. Clean up by hand.
 
 ## Never commit a value specific to one installation
 
