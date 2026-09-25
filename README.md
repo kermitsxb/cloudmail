@@ -121,9 +121,10 @@ pnpm run migrate:remote
 
 **When upgrading an existing installation, run this again before deploying.**
 It's harmless when there's nothing new, and a missing migration fails
-silently (for example, forwarding just stops working). This release adds
-`migrations/0003_raw_key_index.sql`, so `pnpm run migrate:remote` must run
-before `pnpm run deploy`.
+silently — for example, forwarding just stops working, or moving messages
+between folders (trash, restore) fails. This release adds
+`migrations/0004_scheduled_maintenance.sql`, so `pnpm run migrate:remote`
+must run before `pnpm run deploy`.
 
 ### 3. Add your sending identity
 
@@ -310,7 +311,10 @@ deletes up to 100 messages that have been in the trash longer than
 objects per run). Anything left over is handled the following night. Set
 `TRASH_RETENTION_DAYS` to `0` in `wrangler.overrides.json` to keep the trash
 forever. Messages already in the trash when you upgrade get the full
-retention period, counted from the upgrade.
+retention period, counted from the upgrade. Messages moved to the trash
+between applying the migration and deploying the new version have no trash
+date and are never purged automatically; restore and trash them again to
+include them.
 
 ## Roadmap
 

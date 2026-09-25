@@ -271,12 +271,14 @@ the service public. The order encodes real constraints:
   equivalent Cloudmail forwarding rules exist — otherwise there's a window
   where mail is archived but not forwarded.
 - **On an existing installation, `pnpm run migrate:remote` must run before
-  deploying a version with a new migration.** Skipping it breaks nothing
-  visibly: e.g. without `forward_rules`, `GET /api/forwarding/rules` returns
-  500 and incoming mail logs `forward_rules_failed`, archived but never
-  forwarded. Without `0004`, the nightly run logs a failure and the Maintenance view
-  shows "never run"; moving a message to the trash returns 500 (missing
-  `trashed_at`).
+  deploying a version with a new migration.** Skipping it doesn't fail the
+  deploy; the breakage shows up later: without `forward_rules`, `GET
+  /api/forwarding/rules` returns 500 and incoming mail logs
+  `forward_rules_failed`, archived but never forwarded. Without `0004`,
+  moving any message between folders (trash, restore, inbox↔sent) returns
+  500 — the `UPDATE` always writes `trashed_at`, a column that doesn't exist
+  yet — and the nightly run logs a failure while the Maintenance view shows
+  "never run".
 
 ## Two test suites, don't mix them
 
