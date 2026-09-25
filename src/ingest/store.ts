@@ -16,16 +16,21 @@ export const attachmentKey = (messageId: string, index: number, filename: string
   `att/${safeKey(messageId)}/${index}-${sanitizeFilename(filename)}`;
 
 // Écrit les pièces jointes dans R2, une par une, avant toute écriture D1 qui les référence.
+// `onWritten` est appelé après chaque écriture réussie : un appelant qui veut nettoyer les
+// objets déjà écrits si une écriture suivante échoue (reparseInPlace, src/admin/reimport.ts)
+// n'a ainsi pas besoin d'attendre le résultat final, jamais renvoyé en cas d'erreur.
 export async function putAttachments(
   env: Env,
   messageId: string,
   attachments: ParsedAttachment[],
+  onWritten?: (r2Key: string) => void,
 ): Promise<StoredAttachment[]> {
   const stored: StoredAttachment[] = [];
   for (const [i, att] of attachments.entries()) {
     const r2Key = attachmentKey(messageId, i, att.filename);
     await env.MAIL.put(r2Key, att.content, { httpMetadata: { contentType: att.mimeType } });
     stored.push({ ...att, r2Key });
+    onWritten?.(r2Key);
   }
   return stored;
 }

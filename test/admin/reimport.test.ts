@@ -153,6 +153,34 @@ const countMessages = async () =>
 
 const NO_MESSAGE_ID = "From: zoe@example.com\r\nTo: thomas@example.com\r\nSubject: Sans identifiant\r\n\r\nBonjour\r\n";
 
+// Deux pièces jointes, pour observer un échec d'écriture R2 après la première.
+const TWO_ATTACHMENTS = [
+  "From: a@example.com",
+  "To: thomas@example.com",
+  "Subject: Deux PJ",
+  "Message-ID: <two-att@example.com>",
+  "Date: Mon, 08 Sep 2026 12:00:00 +0200",
+  'Content-Type: multipart/mixed; boundary="b3"',
+  "",
+  "--b3",
+  "Content-Type: text/plain; charset=utf-8",
+  "",
+  "Voir les pièces jointes.",
+  "--b3",
+  'Content-Type: text/csv; name="un.csv"',
+  'Content-Disposition: attachment; filename="un.csv"',
+  "Content-Transfer-Encoding: base64",
+  "",
+  "YSxiCjEsMgo=",
+  "--b3",
+  'Content-Type: text/csv; name="deux.csv"',
+  'Content-Disposition: attachment; filename="deux.csv"',
+  "Content-Transfer-Encoding: base64",
+  "",
+  "YywkCjMsNAo=",
+  "--b3--",
+].join("\r\n");
+
 describe("reimportKey — orphelins", () => {
   it("importe un orphelin comme un message neuf, non lu, en boîte de réception", async () => {
     const raw = loadBytes("simple.eml");
@@ -218,6 +246,30 @@ describe("reimportKey — réanalyse sur place", () => {
 
     expect(await messageRow(msg.id)).toMatchObject({ folder: "trash", is_read: 0 });
     expect(await threadTotals()).toEqual(totalsBefore);
+  });
+
+  it("conserve la date déjà en base pour un message dont la date a été inventée", async () => {
+    const msg = await ingest(loadBytes("malformed.eml"));
+    await env.DB.prepare("UPDATE messages SET received_at = 1700000000 WHERE id = ?").bind(msg.id).run();
+    const totalsBefore = await threadTotals();
+
+    await reimportKey(env, msg.rawKey, "dev@localhost");
+
+    const row = await env.DB.prepare("SELECT received_at FROM messages WHERE id = ?").bind(msg.id).first<{ received_at: number }>();
+    expect(row!.received_at).toBe(1700000000);
+    expect(await threadTotals()).toEqual(totalsBefore);
+  });
+
+  it("reprend la date de l'en-tête pour un message dont la date a été correctement analysée", async () => {
+    const msg = await ingest(loadBytes("simple.eml"));
+    const original = (await env.DB.prepare("SELECT received_at FROM messages WHERE id = ?").bind(msg.id).first<{ received_at: number }>())!.received_at;
+    await env.DB.prepare("UPDATE messages SET received_at = 1700000000 WHERE id = ?").bind(msg.id).run();
+
+    await reimportKey(env, msg.rawKey, "dev@localhost");
+
+    const row = await env.DB.prepare("SELECT received_at FROM messages WHERE id = ?").bind(msg.id).first<{ received_at: number }>();
+    expect(row!.received_at).toBe(original);
+    expect(row!.received_at).not.toBe(1700000000);
   });
 
   it("ne duplique pas un message dont le Message-ID a été inventé", async () => {
@@ -293,6 +345,39 @@ describe("reimportKey — réanalyse sur place", () => {
     expect(result).toMatchObject({ outcome: "error", error: "D1 indisponible" });
     expect(await env.MAIL.head("att/att-1-example.com/0-data.csv")).toBeNull();
     expect(await env.MAIL.head("att/att-ancien-example.com/0-data.csv")).not.toBeNull();
+  });
+
+  it("nettoie les pièces jointes déjà écrites si une écriture R2 échoue en cours de réanalyse", async () => {
+    // Ligne existante sans aucune pièce jointe : celles écrites pendant la réanalyse sont
+    // donc entièrement nouvelles, aucune ne préexiste sous le même nom.
+    const raw = textBytes(TWO_ATTACHMENTS);
+    const rawKey = await rawKeyOf(raw);
+    await env.MAIL.put(rawKey, raw);
+    const id = await insertRow({ rawKey, messageId: "<ancien@example.com>", subject: "ancien" });
+    const before = await messageRow(id);
+    let attWrites = 0;
+    const failingMail = new Proxy(env.MAIL, {
+      get(target, prop) {
+        if (prop === "put") {
+          return async (key: string, ...rest: unknown[]) => {
+            if (key.startsWith("att/")) {
+              attWrites++;
+              if (attWrites === 2) throw new Error("R2 indisponible");
+            }
+            return (target.put as (...a: unknown[]) => unknown)(key, ...rest);
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const result = await reimportKey({ ...env, MAIL: failingMail }, rawKey, "dev@localhost");
+
+    expect(result).toMatchObject({ outcome: "error", error: "R2 indisponible" });
+    const remaining = await env.MAIL.list({ prefix: "att/two-att-example.com/" });
+    expect(remaining.objects).toHaveLength(0);
+    expect((await messageRow(id))!.subject).toBe(before!.subject);
   });
 });
 

@@ -84,7 +84,7 @@ export type ReimportResult =
   | { key: string; outcome: "not_found" }
   | { key: string; outcome: "error"; error: string };
 
-type ExistingRow = { id: number; message_id: string; from_addr: string };
+type ExistingRow = { id: number; message_id: string; from_addr: string; received_at: number };
 
 // Supprime des objets R2 sans jamais lever : un échec ici ne laisse qu'un objet de pièce
 // jointe inutilisé, jamais une perte de contenu.
@@ -120,13 +120,25 @@ async function reparseInPlace(env: Env, rawKey: string, raw: ArrayBuffer, row: E
     .bind(row.id).all<{ r2_key: string }>()).results.map((r) => r.r2_key);
 
   // R2 d'abord : les nouvelles pièces jointes existent avant la ligne qui les référence.
-  const stored = await putAttachments(env, messageId, msg.attachments);
+  // Les clés sont notées au fur et à mesure : si une écriture échoue en cours de route, on
+  // retire celles déjà posées pour rien plutôt que de laisser des objets orphelins.
+  const writtenKeys: string[] = [];
+  let stored: Awaited<ReturnType<typeof putAttachments>>;
+  try {
+    stored = await putAttachments(env, messageId, msg.attachments, (k) => writtenKeys.push(k));
+  } catch (err) {
+    await deleteQuietly(env, writtenKeys.filter((k) => !oldKeys.includes(k)), rawKey);
+    throw err;
+  }
   const newKeys = stored.map((s) => s.r2Key);
 
   // Même correspondance colonnes <- message parsé que storeIncoming (src/ingest/store.ts) :
   // une ligne réanalysée doit porter exactement les valeurs qu'une ingestion neuve du même
-  // brut produirait.
+  // brut produirait. La date inventée par ce parsing (dateSynthetic) ne remplace jamais la
+  // date déjà en base : un nouveau parsing en inventerait une autre (l'heure courante) et
+  // chaque réimport re-daterait le message et remonterait son thread en tête.
   const cols = parsedColumns(msg, messageId);
+  if (msg.dateSynthetic) cols.receivedAt = row.received_at;
 
   try {
     await env.DB.batch([
@@ -170,7 +182,7 @@ async function reimport(env: Env, rawKey: string): Promise<ReimportResult> {
   const raw = await obj.arrayBuffer();
 
   const rows = await env.DB.prepare(
-    "SELECT id, message_id, from_addr FROM messages WHERE raw_key = ? AND direction = 'in' ORDER BY id"
+    "SELECT id, message_id, from_addr, received_at FROM messages WHERE raw_key = ? AND direction = 'in' ORDER BY id"
   ).bind(rawKey).all<ExistingRow>();
 
   if (rows.results.length === 0) {
