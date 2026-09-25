@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useIdentities } from "../api/client";
+import { useIdentities, useMaintenance } from "../api/client";
 import logo from "../assets/cloudmail-logo.png";
 import { useI18n } from "../i18n";
 import { Composer } from "./Composer";
@@ -22,6 +22,10 @@ export function Sidebar({
 }) {
   const { t } = useI18n();
   const { data: identities } = useIdentities();
+  const { data: maintenance } = useMaintenance();
+  // Dernière vérification réussie (planifiée ou manuelle) : le badge disparaît dès qu'une
+  // vérification relancée après réimport ne trouve plus rien.
+  const orphans = maintenance?.lastCheck?.orphansCount ?? 0;
   const [composerOpen, setComposerOpen] = useState(false);
 
   return (
@@ -84,7 +88,17 @@ export function Sidebar({
             onClick={() => onSelectView("maintenance")}
             className="w-full rounded px-3 py-2 text-left text-sm hover:bg-accent aria-[current=true]:bg-accent aria-[current=true]:font-semibold"
           >
-            {t.sidebar.maintenance}
+            <span className="flex items-center justify-between gap-2">
+              {t.sidebar.maintenance}
+              {orphans > 0 && (
+                <span
+                  aria-label={t.maintenance.scheduled.orphansFound(orphans)}
+                  className="rounded-full bg-destructive px-2 text-xs font-semibold text-white"
+                >
+                  {orphans}
+                </span>
+              )}
+            </span>
           </button>
         </li>
       </ul>

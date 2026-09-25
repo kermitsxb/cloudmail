@@ -25,6 +25,10 @@ installation is configured with its own domain and its own sending identities.
   the addresses you allow can log in
 - **Nothing is ever lost** — every received message is archived in its raw
   form before anything else happens
+- **Scheduled maintenance** — every night, messages that have been in the
+  trash for more than 30 days (configurable) are deleted for good, and the
+  storage is checked for received mail missing from the app; the Maintenance
+  view and a sidebar badge show the result
 - Interface in English and French: it follows the browser language, and a
   selector in the sidebar remembers another choice
 
@@ -117,9 +121,10 @@ pnpm run migrate:remote
 
 **When upgrading an existing installation, run this again before deploying.**
 It's harmless when there's nothing new, and a missing migration fails
-silently (for example, forwarding just stops working). This release adds
-`migrations/0003_raw_key_index.sql`, so `pnpm run migrate:remote` must run
-before `pnpm run deploy`.
+silently — for example, forwarding just stops working, or moving messages
+between folders (trash, restore) fails. This release adds
+`migrations/0004_scheduled_maintenance.sql`, so `pnpm run migrate:remote`
+must run before `pnpm run deploy`.
 
 ### 3. Add your sending identity
 
@@ -209,6 +214,7 @@ external mailbox.
 | Variable | Where | Purpose |
 | --- | --- | --- |
 | `MAIL_DOMAIN` | `wrangler.overrides.json` → `vars` | Your domain, used in the `Message-ID` of sent mail |
+| `TRASH_RETENTION_DAYS` | `wrangler.jsonc` → `vars` (override in `wrangler.overrides.json`) | Days before trashed messages are deleted for good; `0` disables it (default `30`) |
 | `ACCESS_TEAM_DOMAIN` | secret | Your Cloudflare Access team domain |
 | `ACCESS_AUD` | secret | The Access application's Audience tag |
 | `ALLOWED_EMAILS` | secret | Address(es) allowed to log in, comma-separated |
@@ -246,10 +252,11 @@ that has already been applied is never replayed, even if you edit it.
 Every incoming message is saved to R2 before anything else. If a later step
 fails, the message is still in R2 but won't show up in the app.
 
-Open **Maintenance** in the sidebar and click **Analyser le stockage**: it
-lists every message stored in R2 but missing from the app, and lets you
-re-import them. The manual procedure below does the same from a terminal and
-stays useful if the Worker itself can't run.
+This is checked every night: when messages stored in R2 are missing from the
+app, a badge appears next to **Maintenance** in the sidebar. Open it and click
+**Analyser le stockage** to list them and re-import them; **Relancer la
+vérification** updates the count right away. The manual procedure below does
+the same from a terminal and stays useful if the Worker itself can't run.
 
 To find such messages by hand, compare the keys known to the database with
 the objects in the bucket:
@@ -296,11 +303,21 @@ useful after an update that fixes how some messages are parsed. Use
 réimporter** for every message that failed to parse. Re-importing keeps the
 message's folder, read state and conversation, and never forwards it again.
 
+### Scheduled maintenance
+
+A Cron Trigger runs once a night (`17 3 * * *` UTC, in `wrangler.jsonc`). It
+deletes up to 100 messages that have been in the trash longer than
+`TRASH_RETENTION_DAYS`, then counts orphaned messages (up to 10,000 stored
+objects per run). Anything left over is handled the following night. Set
+`TRASH_RETENTION_DAYS` to `0` in `wrangler.overrides.json` to keep the trash
+forever. Messages already in the trash when you upgrade get the full
+retention period, counted from the upgrade. Messages moved to the trash
+between applying the migration and deploying the new version have no trash
+date and are never purged automatically; restore and trash them again to
+include them.
+
 ## Roadmap
 
-- Scheduled maintenance: automatic emptying of the trash after a set number of
-  days, and a periodic check that counts messages stored in R2 but missing from
-  the app, so lost mail is detected without the manual procedure above
 - SPF/DKIM/DMARC results shown on each message, with a warning on likely
   spoofing, and a Spam folder
 

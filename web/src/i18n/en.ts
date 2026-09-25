@@ -37,6 +37,8 @@ export const en: Catalog = {
     label: "Conversations",
     hasAttachment: "Has an attachment",
     loadMore: "Load more",
+    trashNotice: (days) =>
+      `Messages in the trash are permanently deleted after ${days} ${plural.select(days) === "one" ? "day" : "days"}.`,
   },
   threadView: {
     recipients: (list) => `To: ${list}`,
@@ -129,6 +131,29 @@ export const en: Catalog = {
     title: "Maintenance",
     size: { bytes: "B", kilobytes: "KB", megabytes: "MB" },
     reimporting: "Re-importing…",
+    scheduled: {
+      title: "Scheduled maintenance",
+      intro:
+        "Every night, Cloudmail empties old messages from the trash and checks that no received message is missing from the mailbox.",
+      retention: (days) =>
+        `The trash is emptied of messages older than ${days} ${plural.select(days) === "one" ? "day" : "days"}.`,
+      retentionDisabled: "Automatic trash purge disabled.",
+      neverRun: "No scheduled run yet.",
+      lastRun: (date) => `Last run: ${date}`,
+      purged: (n) => `${n} ${plural.select(n) === "one" ? "message" : "messages"} deleted from the trash`,
+      purgeFailed: (n) => `${n} ${plural.select(n) === "one" ? "deletion" : "deletions"} failed`,
+      purgeRemaining: (n) =>
+        `${n} ${plural.select(n) === "one" ? "message" : "messages"} left to delete on the next run`,
+      runFailed: (detail) => `Error during the run: ${detail}`,
+      neverChecked: "Storage never checked.",
+      orphansNone: "No orphaned messages.",
+      orphansFound: (n) => `${n} orphaned ${plural.select(n) === "one" ? "message" : "messages"} detected`,
+      orphansPartial: (n) =>
+        `Partial check: ${n} ${plural.select(n) === "one" ? "orphan" : "orphans"} among the first 10,000 objects`,
+      checkedAt: (date) => `checked on ${date}`,
+      recheck: "Re-run the check",
+      rechecking: "Checking…",
+    },
     orphans: {
       title: "Orphaned messages",
       intro: "Messages kept in storage but missing from the mailbox, after a failure when they were received.",

@@ -162,6 +162,20 @@ describe("purgeMessage", () => {
     expect(t).toMatchObject({ message_count: 1, unread_count: 1 });
   });
 
+  it("ne supprime pas un raw_key encore référencé par une autre ligne", async () => {
+    // Deux messages distincts partageant le même raw_key (mêmes octets livrés deux fois sans
+    // Message-Id, donc deux ids synthétiques) : purger l'un ne doit pas emporter l'archive brute
+    // de l'autre.
+    await env.DB.prepare("UPDATE messages SET raw_key = 'raw/shared.eml' WHERE id IN (1, 2)").run();
+    await env.MAIL.put("raw/shared.eml", "brut partagé");
+
+    expect(await purgeMessage(env as unknown as Env, 1)).toBe(true);
+
+    expect(await env.DB.prepare("SELECT id FROM messages WHERE id = 1").first()).toBeNull();
+    expect(await env.DB.prepare("SELECT id FROM messages WHERE id = 2").first()).not.toBeNull();
+    expect(await env.MAIL.get("raw/shared.eml")).not.toBeNull();
+  });
+
   it("supprime les objets R2 avant la ligne D1 : si R2 échoue, la ligne D1 reste intacte", async () => {
     await env.MAIL.put("raw/m1.eml", "brut");
     const wrappedEnv = {
@@ -181,6 +195,33 @@ describe("purgeMessage", () => {
     const t = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = 1")
       .first<{ message_count: number; unread_count: number }>();
     expect(t).toMatchObject({ message_count: 2, unread_count: 2 });
+  });
+});
+
+describe("moveToFolder — trashed_at", () => {
+  const trashedAt = async (id: number) =>
+    (await env.DB.prepare("SELECT trashed_at FROM messages WHERE id = ?").bind(id)
+      .first<{ trashed_at: number | null }>())?.trashed_at;
+
+  it("date l'entrée en corbeille et l'efface à la sortie", async () => {
+    const before = Math.floor(Date.now() / 1000);
+    await moveToFolder(env.DB, 1, "trash");
+    expect(await trashedAt(1)).toBeGreaterThanOrEqual(before - 1);
+    await moveToFolder(env.DB, 1, "inbox");
+    expect(await trashedAt(1)).toBeNull();
+  });
+
+  it("redémarre le délai quand un message restauré retourne à la corbeille", async () => {
+    await moveToFolder(env.DB, 1, "trash");
+    await env.DB.prepare("UPDATE messages SET trashed_at = 1000 WHERE id = 1").run();
+    await moveToFolder(env.DB, 1, "inbox");
+    await moveToFolder(env.DB, 1, "trash");
+    expect(await trashedAt(1)).toBeGreaterThan(1000);
+  });
+
+  it("ne date rien lors d'un déplacement hors corbeille", async () => {
+    await moveToFolder(env.DB, 1, "sent");
+    expect(await trashedAt(1)).toBeNull();
   });
 });
 

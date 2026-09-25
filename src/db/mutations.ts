@@ -43,7 +43,16 @@ export async function moveToFolder(
   const wasTrash = row.folder === "trash";
   const goingToTrash = folder === "trash";
 
-  const statements = [db.prepare("UPDATE messages SET folder = ? WHERE id = ?").bind(folder, messageId)];
+  // trashed_at date l'entrée en corbeille (point de départ de la purge planifiée) : il est
+  // remis à l'heure courante à chaque entrée et effacé à chaque sortie.
+  const statements = [
+    db.prepare(
+      `UPDATE messages
+          SET folder = ?1,
+              trashed_at = CASE WHEN ?1 = 'trash' THEN unixepoch() ELSE NULL END
+        WHERE id = ?2`
+    ).bind(folder, messageId),
+  ];
 
   // message_count et unread_count ne comptabilisent que les messages hors corbeille. Un
   // aller-retour inbox <-> sent (les deux hors corbeille) ne doit donc toucher aucun des deux
@@ -77,6 +86,19 @@ export async function purgeMessage(env: Env, messageId: number): Promise<boolean
     .bind(messageId)
     .all<{ r2_key: string }>();
 
+  // Une clé de brut adressée par contenu (raw/<sha256>.eml) peut être partagée par deux lignes
+  // messages : deux livraisons aux octets strictement identiques, sans Message-Id (ou avec un
+  // Message-Id qui se retrouve dupliqué), reçoivent chacune un id synthétique distinct mais le
+  // même raw_key. Si on la supprimait quand même, purger l'une des deux lignes emporterait
+  // l'archive brute de l'autre encore présente — violerait "aucun message reçu n'est jamais
+  // perdu". On vérifie donc, avant de toucher R2, si une autre ligne référence encore ce
+  // raw_key ; si oui, on ne le supprime pas (les pièces jointes de ce message-ci, propres à sa
+  // ligne, sont supprimées comme d'habitude).
+  const sharedRaw = await env.DB
+    .prepare("SELECT 1 FROM messages WHERE raw_key = ? AND id <> ?")
+    .bind(row.raw_key, messageId)
+    .first();
+
   // Ordre volontaire (retour sur décision) : on supprime d'abord les objets R2, puis la ligne
   // D1. `R2Bucket#delete` est idempotent — répéter l'appel sur des clés déjà absentes ne fait
   // rien — donc une purge interrompue après la suppression R2 mais avant la suppression D1 se
@@ -91,7 +113,7 @@ export async function purgeMessage(env: Env, messageId: number): Promise<boolean
   // l'ordre retenu (une ligne D1 qui référence des objets déjà supprimés, le temps d'un rejeu)
   // est au contraire visible (404 sur la pièce jointe ou le brut) et réparable en relançant la
   // purge.
-  const keys = [row.raw_key, ...atts.results.map((a) => a.r2_key)];
+  const keys = [...(sharedRaw ? [] : [row.raw_key]), ...atts.results.map((a) => a.r2_key)];
   await env.MAIL.delete(keys);
 
   // Un message déjà à la corbeille a déjà été retiré de message_count/unread_count par
@@ -121,11 +143,6 @@ export async function purgeMessage(env: Env, messageId: number): Promise<boolean
     await env.DB.prepare("DELETE FROM threads WHERE id = ?").bind(row.thread_id).run();
   }
 
-  // Une clé de brut adressée par contenu (raw/<sha256>.eml) pourrait en théorie être partagée
-  // par deux messages aux octets strictement identiques ; l'unicité de messages.message_id
-  // rend ce cas quasi impossible en pratique (il faudrait deux Message-Id différents pour un
-  // corps d'e-mail rigoureusement identique). On ne construit pas de comptage de références
-  // pour ce cas résiduel.
   return true;
 }
 

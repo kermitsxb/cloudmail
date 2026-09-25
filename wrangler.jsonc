@@ -5,6 +5,9 @@
   "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // Maintenance planifiée (src/maintenance/run.ts), une fois par nuit. Le plan gratuit
+  // n'autorise qu'un déclencheur Cron par Worker : les deux tâches le partagent.
+  "triggers": { "crons": ["17 3 * * *"] },
   // Placeholder. Le sous-domaine réel n'est PAS versionné : il vit dans
   // wrangler.overrides.json (ignoré par git), appliqué au déploiement par
   // scripts/config.mjs. Voir « Ne jamais versionner de valeur propre à votre
@@ -45,6 +48,10 @@
     // Domaine utilisé pour générer le Message-ID des emails envoyés (voir
     // src/api/routes.ts). Placeholder ici ; le domaine réel vit dans
     // wrangler.overrides.json (ignoré par git).
-    "MAIL_DOMAIN": "example.com"
+    "MAIL_DOMAIN": "example.com",
+    // Jours avant qu'un message de la corbeille soit supprimé définitivement par la
+    // maintenance planifiée. "0" désactive la purge. Surchargeable dans
+    // wrangler.overrides.json.
+    "TRASH_RETENTION_DAYS": "30"
   }
 }

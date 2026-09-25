@@ -190,7 +190,7 @@ export type ForwardRule = {
   lastError: string | null;
 };
 
-export type AppConfig = { mailDomain: string };
+export type AppConfig = { mailDomain: string; trashRetentionDays: number | null };
 
 export const useConfig = () =>
   useQuery({ queryKey: ["config"], queryFn: () => api<AppConfig>("/config") });
@@ -292,6 +292,37 @@ export const useParseErrors = () =>
       return all;
     },
   });
+
+// Miroir volontaire de MaintenanceRun dans src/maintenance/runs.ts.
+export type MaintenanceRun = {
+  id: number;
+  ranAt: number;
+  trigger: "cron" | "manual";
+  trashPurged: number | null;
+  trashFailed: number | null;
+  trashRemaining: number | null;
+  orphansCount: number | null;
+  orphansComplete: boolean | null;
+  orphansSample: string[];
+  error: string | null;
+};
+
+export type MaintenanceStatus = {
+  retentionDays: number | null;
+  lastRun: MaintenanceRun | null;
+  lastCheck: MaintenanceRun | null;
+};
+
+export const useMaintenance = () =>
+  useQuery({ queryKey: ["maintenance"], queryFn: () => api<MaintenanceStatus>("/admin/maintenance") });
+
+export const useOrphanCheck = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<MaintenanceRun>("/admin/maintenance/orphan-check", { method: "POST" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["maintenance"] }),
+  });
+};
 
 export const useReimportMessage = () => {
   const qc = useQueryClient();

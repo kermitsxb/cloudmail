@@ -41,3 +41,27 @@ describe("sélecteur de langue", () => {
     expect(select).toHaveTextContent("English");
   });
 });
+
+describe("badge des orphelins", () => {
+  const stubWith = (maintenance: unknown) =>
+    vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+      Response.json(
+        url === "/api/admin/maintenance" ? maintenance
+          : url.startsWith("/api/threads") ? { threads: [], cursor: null }
+          : [],
+      ),
+    ));
+
+  it("affiche le nombre d'orphelins détectés", async () => {
+    stubWith({ retentionDays: 30, lastRun: null, lastCheck: { orphansCount: 3, orphansComplete: true } });
+    render(<App />, { wrapper });
+    expect(await screen.findByLabelText("3 messages orphelins détectés")).toHaveTextContent("3");
+  });
+
+  it("n'affiche rien sans orphelin", async () => {
+    stubWith({ retentionDays: 30, lastRun: null, lastCheck: { orphansCount: 0, orphansComplete: true } });
+    render(<App />, { wrapper });
+    await screen.findByRole("button", { name: "Maintenance" });
+    expect(screen.queryByLabelText(/orphelin/)).toBeNull();
+  });
+});
