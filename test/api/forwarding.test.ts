@@ -49,7 +49,7 @@ describe("GET /api/config", () => {
   it("expose le domaine de courrier", async () => {
     const res = await req("/api/config");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ mailDomain: "example.com" });
+    expect(await res.json()).toEqual({ mailDomain: "example.com", trashRetentionDays: 30 });
   });
 });
 

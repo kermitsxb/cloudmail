@@ -16,6 +16,9 @@ import {
 import { RoutingUnavailableError, listVerifiedDestinations } from "../forwarding/destinations";
 import { createIdentity, deleteIdentity, listIdentities, updateIdentity } from "../identities";
 import { RAW_KEY_PATTERN, listOrphans, listParseErrors, reimportKey } from "../admin/reimport";
+import { runOrphanCheck } from "../maintenance/run";
+import { latestRuns } from "../maintenance/runs";
+import { retentionDays } from "../maintenance/trash";
 
 export type ApiEnv = { Bindings: Env; Variables: { identity: AccessIdentity } };
 
@@ -456,7 +459,7 @@ api.get("/messages/:id/raw", async (c) => {
   });
 });
 
-api.get("/config", (c) => c.json({ mailDomain: c.env.MAIL_DOMAIN }));
+api.get("/config", (c) => c.json({ mailDomain: c.env.MAIL_DOMAIN, trashRetentionDays: retentionDays(c.env) }));
 
 api.get("/forwarding/rules", async (c) => c.json(await listForwardRules(c.env.DB)));
 
@@ -550,6 +553,28 @@ api.get("/admin/parse-errors", async (c) => {
   } catch (err) {
     return storageUnavailableResponse("/admin/parse-errors", err);
   }
+});
+
+api.get("/admin/maintenance", async (c) => {
+  try {
+    return c.json({ retentionDays: retentionDays(c.env), ...(await latestRuns(c.env)) });
+  } catch (err) {
+    return storageUnavailableResponse("/admin/maintenance", err);
+  }
+});
+
+// Vérification des orphelins à la demande, pour que le badge ne reste pas périmé après un
+// réimport manuel. Jamais de purge ici : elle reste réservée au passage planifié. Un échec
+// est enregistré (historique) mais renvoyé en 503, pour que l'interface l'affiche.
+api.post("/admin/maintenance/orphan-check", async (c) => {
+  const run = await runOrphanCheck(c.env, Math.floor(Date.now() / 1000));
+  if (run === null || run.orphansCount === null) {
+    return storageUnavailableResponse(
+      "/admin/maintenance/orphan-check",
+      new Error(run?.error ?? "maintenance run not recorded"),
+    );
+  }
+  return c.json(run);
 });
 
 // Réimporte des bruts un par un, dans l'ordre de la requête. 200 même si certaines clés
