@@ -37,6 +37,8 @@ export const en: Catalog = {
     label: "Conversations",
     hasAttachment: "Has an attachment",
     loadMore: "Load more",
+    trashNotice: (days) =>
+      `Messages in the trash are permanently deleted after ${days} ${plural.select(days) === "one" ? "day" : "days"}.`,
   },
   threadView: {
     recipients: (list) => `To: ${list}`,

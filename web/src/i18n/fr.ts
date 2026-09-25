@@ -38,6 +38,8 @@ export const fr = {
     label: "Conversations",
     hasAttachment: "Contient une pièce jointe",
     loadMore: "Charger plus",
+    trashNotice: (days: number) =>
+      `Les messages de la corbeille sont supprimés définitivement après ${days} ${plural.select(days) === "one" ? "jour" : "jours"}.`,
   },
   threadView: {
     recipients: (list: string) => `À : ${list}`,

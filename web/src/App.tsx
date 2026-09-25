@@ -7,6 +7,7 @@ import { MaintenanceSettings } from "./components/MaintenanceSettings";
 import { Sidebar } from "./components/Sidebar";
 import { ThreadList } from "./components/ThreadList";
 import { ThreadView } from "./components/ThreadView";
+import { TrashNotice } from "./components/TrashNotice";
 import { useI18n } from "./i18n";
 
 const queryClient = new QueryClient();
@@ -66,6 +67,7 @@ function Mailbox() {
                 </span>
               </button>
             </div>
+            {folder === "trash" && <TrashNotice />}
             <div className="flex-1 overflow-y-auto">
               <ThreadList
                 threads={threads}
