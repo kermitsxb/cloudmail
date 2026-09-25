@@ -256,11 +256,27 @@ the service public. The order encodes real constraints:
 
 - `pnpm vitest run` at the root: the Worker, in the Workers runtime (Miniflare
   provides D1 and R2). 22 files.
-- `pnpm --filter web test`: the SPA, in jsdom. 10 files.
+- `pnpm --filter web test`: the SPA, in jsdom. 13 files.
 
 `pnpm test` runs both in sequence. `pnpm typecheck` only covers the Worker:
 only `pnpm build` typechecks the SPA (`tsc -b`), so a typing error in `web/`
 only shows up at build time.
+
+## Interface language
+
+The SPA ships in French and English (`web/src/i18n/`). `fr.ts` is the reference
+catalogue; `en.ts` is typed against it, so a missing or extra key fails
+`pnpm build`. Every visible string — text, `aria-label`, `title`,
+`placeholder` — goes through `useI18n().t`; dates go through
+`useI18n().formatDate`. Component tests render with `renderWithI18n`
+(`web/src/test/i18n.tsx`), French by default.
+
+API error `message`s are English fallbacks for developers. An error a user must
+understand gets a stable `code`, or a `reason` for a validation error raised
+from a form (zod `.refine(…, { params: { reason } })`), and its translation in
+both catalogues under `errors.codes` / `errors.reasons`. The SPA picks
+`reason` → `code` → `message` → HTTP status (`web/src/lib/errors.ts`). Never
+rename an existing `code`: it is the contract the SPA relies on.
 
 ## Running locally
 
