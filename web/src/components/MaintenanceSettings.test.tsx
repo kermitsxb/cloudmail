@@ -145,3 +145,12 @@ describe("MaintenanceSettings — erreurs d'analyse", () => {
     expect(await screen.findByText("Aucun message en erreur d'analyse.")).toBeDefined();
   });
 });
+
+describe("MaintenanceSettings — anglais", () => {
+  it("s'affiche en anglais", async () => {
+    stubApi({});
+    render(<MaintenanceSettings />, { wrapper, locale: "en" });
+    await userEvent.click(screen.getByRole("button", { name: "Scan storage" }));
+    expect(await screen.findByText("No orphaned messages.")).toBeDefined();
+  });
+});

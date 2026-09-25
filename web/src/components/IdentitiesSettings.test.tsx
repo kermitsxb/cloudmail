@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithI18n as render } from "../test/i18n";
 import { IdentitiesSettings } from "./IdentitiesSettings";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -146,5 +147,27 @@ describe("IdentitiesSettings", () => {
 
     expect(await screen.findByText(/Impossible de lire les identités/)).toBeDefined();
     expect(screen.queryByText("Aucune identité.")).toBeNull();
+  });
+
+  it("traduit le refus d'une partie locale invalide", async () => {
+    stubApi({ identities: [identity()] });
+    vi.mocked(fetch).mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+      if (url === "/api/config") return json({ mailDomain: "example.com" });
+      if ((init?.method ?? "GET") === "GET") return json([identity()]);
+      return json({ error: { code: "invalid_body", reason: "invalid_local_part", message: "Invalid local part" } }, 400);
+    });
+    render(<IdentitiesSettings />, { wrapper });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Ajouter une identité" }));
+    await userEvent.type(screen.getByLabelText("Partie locale"), "a b");
+    await userEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
+    expect(await screen.findByText("Partie locale invalide.")).toBeDefined();
+  });
+
+  it("s'affiche en anglais", async () => {
+    stubApi({ identities: [identity()] });
+    render(<IdentitiesSettings />, { wrapper, locale: "en" });
+    expect(await screen.findByRole("heading", { name: "Identities" })).toBeDefined();
+    expect(await screen.findByRole("button", { name: "Delete identity thomas@example.com" })).toBeDefined();
   });
 });

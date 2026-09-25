@@ -7,10 +7,13 @@ import {
   useUpdateIdentity,
   type Identity,
 } from "../api/client";
+import { useI18n } from "../i18n";
+import { errorText } from "../lib/errors";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
 function IdentityRow({ identity }: { identity: Identity }) {
+  const { t } = useI18n();
   const update = useUpdateIdentity();
   const remove = useDeleteIdentity();
 
@@ -27,44 +30,45 @@ function IdentityRow({ identity }: { identity: Identity }) {
             l'état d'avant sans rien dire : ces messages sont la seule trace de l'échec. */}
         {update.isError && (
           <p className="mt-1 text-xs text-destructive">
-            Modification impossible : {update.error.message}
+            {t.identities.updateFailed(errorText(update.error, t))}
           </p>
         )}
         {remove.isError && (
           <p className="mt-1 text-xs text-destructive">
-            Suppression impossible : {remove.error.message}
+            {t.common.deleteFailed(errorText(remove.error, t))}
           </p>
         )}
       </div>
 
       {identity.isDefault ? (
         <span className="rounded border border-border px-2 py-1 text-xs text-muted-foreground">
-          Par défaut
+          {t.identities.isDefault}
         </span>
       ) : (
         <button
           type="button"
-          aria-label={`Définir ${identity.address} comme identité par défaut`}
+          aria-label={t.identities.makeDefaultLabel(identity.address)}
           onClick={() => update.mutate({ address: identity.address, isDefault: true })}
           className="rounded border border-border px-2 py-1 text-xs hover:bg-accent"
         >
-          Définir par défaut
+          {t.identities.makeDefault}
         </button>
       )}
 
       <button
         type="button"
-        aria-label={`Supprimer l'identité ${identity.address}`}
+        aria-label={t.identities.deleteLabel(identity.address)}
         onClick={() => remove.mutate(identity.address)}
         className="rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
       >
-        Supprimer
+        {t.common.delete}
       </button>
     </li>
   );
 }
 
 function NewIdentityForm({ mailDomain, onDone }: { mailDomain: string; onDone: () => void }) {
+  const { t } = useI18n();
   const create = useCreateIdentity();
   const [localPart, setLocalPart] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -80,10 +84,10 @@ function NewIdentityForm({ mailDomain, onDone }: { mailDomain: string; onDone: (
   return (
     <form onSubmit={submit} className="flex flex-col gap-4 border border-border p-4 text-sm">
       <label className="flex flex-col gap-1">
-        Adresse
+        {t.identities.address}
         <div className="flex items-center gap-1">
           <Input
-            aria-label="Partie locale"
+            aria-label={t.common.localPart}
             value={localPart}
             onChange={(e) => setLocalPart(e.target.value)}
             className="w-40"
@@ -93,25 +97,25 @@ function NewIdentityForm({ mailDomain, onDone }: { mailDomain: string; onDone: (
       </label>
 
       <label className="flex flex-col gap-1">
-        Nom affiché
+        {t.identities.displayName}
         <Input
-          aria-label="Nom affiché"
+          aria-label={t.identities.displayName}
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
-          placeholder="Your Name"
+          placeholder={t.identities.displayNamePlaceholder}
         />
       </label>
 
-      {create.isError && <p className="text-xs text-destructive">{create.error.message}</p>}
+      {create.isError && <p className="text-xs text-destructive">{errorText(create.error, t)}</p>}
 
       <div className="flex gap-2">
         {/* create.isPending dans la condition : sans lui, un double-clic envoie deux POST et
             le second répond 409 sur un formulaire déjà fermé. */}
         <Button type="submit" disabled={create.isPending || !localPart.trim()}>
-          Enregistrer
+          {t.common.save}
         </Button>
         <Button type="button" variant="ghost" onClick={onDone}>
-          Annuler
+          {t.common.cancel}
         </Button>
       </div>
     </form>
@@ -119,6 +123,7 @@ function NewIdentityForm({ mailDomain, onDone }: { mailDomain: string; onDone: (
 }
 
 export function IdentitiesSettings() {
+  const { t } = useI18n();
   const config = useConfig();
   const identities = useIdentities();
   const [adding, setAdding] = useState(false);
@@ -129,30 +134,24 @@ export function IdentitiesSettings() {
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-6">
       <header className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Identités</h1>
+        <h1 className="text-lg font-semibold">{t.identities.title}</h1>
         {!adding && mailDomain !== undefined && (
           <Button type="button" onClick={() => setAdding(true)}>
-            Ajouter une identité
+            {t.identities.add}
           </Button>
         )}
       </header>
 
-      <p className="text-sm text-muted-foreground">
-        Les identités disponibles apparaissent dans le sélecteur « De » du formulaire d'envoi.
-        Le nom affiché est celui que verra le destinataire dans son client de messagerie.
-      </p>
+      <p className="text-sm text-muted-foreground">{t.identities.intro}</p>
 
       {identities.isError && (
         <p className="text-sm text-destructive">
-          Impossible de lire les identités : {identities.error.message}.
+          {t.identities.readFailed(errorText(identities.error, t))}
         </p>
       )}
 
       {config.isError && (
-        <p className="text-sm text-destructive">
-          Le domaine de messagerie n'a pas pu être lu : les adresses seraient incomplètes, les
-          identités ne sont donc pas affichées. Rechargez la page.
-        </p>
+        <p className="text-sm text-destructive">{t.identities.configFailed}</p>
       )}
 
       {mailDomain !== undefined && (
@@ -160,7 +159,7 @@ export function IdentitiesSettings() {
           {adding && <NewIdentityForm mailDomain={mailDomain} onDone={() => setAdding(false)} />}
 
           {identities.isSuccess && identities.data.length === 0 && (
-            <p className="text-sm text-muted-foreground">Aucune identité.</p>
+            <p className="text-sm text-muted-foreground">{t.identities.empty}</p>
           )}
 
           <ul>

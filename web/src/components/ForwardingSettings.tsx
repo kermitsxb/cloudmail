@@ -8,19 +8,23 @@ import {
   useUpdateForwardRule,
   type ForwardRule,
 } from "../api/client";
+import { useI18n } from "../i18n";
+import type { Catalog } from "../i18n/fr";
+import { errorText } from "../lib/errors";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
 const CATCH_ALL = "*";
 const DASHBOARD_URL = "https://dash.cloudflare.com/?to=/:account/email/routing/destination-addresses";
 
-const sourceLabel = (rule: ForwardRule, mailDomain: string) =>
-  rule.matchLocal === CATCH_ALL ? "Toutes les adresses" : `${rule.matchLocal}@${mailDomain}`;
+const sourceLabel = (rule: ForwardRule, mailDomain: string, t: Catalog) =>
+  rule.matchLocal === CATCH_ALL ? t.forwarding.allAddresses : `${rule.matchLocal}@${mailDomain}`;
 
 function RuleRow({ rule, mailDomain }: { rule: ForwardRule; mailDomain: string }) {
+  const { t } = useI18n();
   const update = useUpdateForwardRule();
   const remove = useDeleteForwardRule();
-  const label = sourceLabel(rule, mailDomain);
+  const label = sourceLabel(rule, mailDomain, t);
 
   return (
     <li className="flex items-center gap-3 border-b border-border py-3 text-sm">
@@ -32,7 +36,7 @@ function RuleRow({ rule, mailDomain }: { rule: ForwardRule; mailDomain: string }
         </p>
         {rule.lastStatus === "error" && (
           <p className="mt-1 text-xs text-destructive">
-            Dernière tentative en échec : {rule.lastError}
+            {t.forwarding.lastFailure(rule.lastError ?? "")}
           </p>
         )}
         {/* Les deux mutations invalident la liste dans onSettled, donc un refus
@@ -41,12 +45,12 @@ function RuleRow({ rule, mailDomain }: { rule: ForwardRule; mailDomain: string }
             messages sont la seule trace de l'échec. */}
         {update.isError && (
           <p className="mt-1 text-xs text-destructive">
-            Activation inchangée : {update.error.message}
+            {t.forwarding.toggleFailed(errorText(update.error, t))}
           </p>
         )}
         {remove.isError && (
           <p className="mt-1 text-xs text-destructive">
-            Suppression impossible : {remove.error.message}
+            {t.common.deleteFailed(errorText(remove.error, t))}
           </p>
         )}
       </div>
@@ -57,26 +61,27 @@ function RuleRow({ rule, mailDomain }: { rule: ForwardRule; mailDomain: string }
         aria-checked={rule.enabled}
         // Le nom accessible annonce l'action offerte, pas l'état courant : sur
         // une règle déjà active, cliquer la désactive.
-        aria-label={`${rule.enabled ? "Désactiver" : "Activer"} la redirection ${label}`}
+        aria-label={t.forwarding.toggleLabel(rule.enabled, label)}
         onClick={() => update.mutate({ id: rule.id, enabled: !rule.enabled })}
         className="rounded border border-border px-2 py-1 text-xs aria-[checked=true]:bg-accent"
       >
-        {rule.enabled ? "Active" : "Inactive"}
+        {rule.enabled ? t.forwarding.active : t.forwarding.inactive}
       </button>
 
       <button
         type="button"
-        aria-label={`Supprimer la redirection ${label}`}
+        aria-label={t.forwarding.deleteLabel(label)}
         onClick={() => remove.mutate(rule.id)}
         className="rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
       >
-        Supprimer
+        {t.common.delete}
       </button>
     </li>
   );
 }
 
 function NewRuleForm({ mailDomain, onDone }: { mailDomain: string; onDone: () => void }) {
+  const { t } = useI18n();
   const destinations = useForwardDestinations();
   const create = useCreateForwardRule();
   const [catchAll, setCatchAll] = useState(false);
@@ -100,14 +105,14 @@ function NewRuleForm({ mailDomain, onDone }: { mailDomain: string; onDone: () =>
   return (
     <form onSubmit={submit} className="flex flex-col gap-4 border border-border p-4 text-sm">
       <fieldset className="flex flex-col gap-2">
-        <legend className="sr-only">Adresse source</legend>
+        <legend className="sr-only">{t.forwarding.sourceLegend}</legend>
         <label className="flex items-center gap-2">
           <input type="radio" checked={!catchAll} onChange={() => setCatchAll(false)} />
-          Une adresse
+          {t.forwarding.oneAddress}
         </label>
         <div className="flex items-center gap-1 pl-6">
           <Input
-            aria-label="Partie locale"
+            aria-label={t.common.localPart}
             value={local}
             disabled={catchAll}
             onChange={(e) => setLocal(e.target.value)}
@@ -117,37 +122,34 @@ function NewRuleForm({ mailDomain, onDone }: { mailDomain: string; onDone: () =>
         </div>
         <label className="flex items-center gap-2">
           <input type="radio" checked={catchAll} onChange={() => setCatchAll(true)} />
-          Toutes les adresses du domaine
+          {t.forwarding.wholeDomain}
         </label>
       </fieldset>
 
       {unavailable && (
-        <p className="text-xs text-destructive">
-          Impossible de lire les destinations vérifiées du compte Cloudflare. Vérifiez que le
-          secret CF_ROUTING_TOKEN est posé sur le Worker.
-        </p>
+        <p className="text-xs text-destructive">{t.forwarding.destinationsUnavailable}</p>
       )}
 
       {empty && (
         <p className="text-xs text-muted-foreground">
-          Aucune destination vérifiée. Ajoutez-en une depuis le{" "}
+          {t.forwarding.noDestinationBefore}{" "}
           <a href={DASHBOARD_URL} target="_blank" rel="noreferrer" className="underline">
-            dashboard Cloudflare
+            {t.forwarding.noDestinationLink}
           </a>
-          , puis cliquez le lien de confirmation reçu par mail.
+          {t.forwarding.noDestinationAfter}
         </p>
       )}
 
       {!unavailable && !empty && (
         <label className="flex flex-col gap-1">
-          Vers
+          {t.forwarding.to}
           <select
-            aria-label="Vers"
+            aria-label={t.forwarding.to}
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
             className="rounded border border-border bg-transparent px-3 py-2"
           >
-            <option value="">── choisir ──</option>
+            <option value="">{t.forwarding.choose}</option>
             {destinations.data?.destinations.map((d) => (
               <option key={d} value={d}>
                 {d}
@@ -157,7 +159,7 @@ function NewRuleForm({ mailDomain, onDone }: { mailDomain: string; onDone: () =>
         </label>
       )}
 
-      {create.isError && <p className="text-xs text-destructive">{create.error.message}</p>}
+      {create.isError && <p className="text-xs text-destructive">{errorText(create.error, t)}</p>}
 
       <div className="flex gap-2">
         {/* create.isPending dans la condition : sans lui, un double-clic envoie
@@ -166,10 +168,10 @@ function NewRuleForm({ mailDomain, onDone }: { mailDomain: string; onDone: () =>
           type="submit"
           disabled={create.isPending || !destination || (!catchAll && !local.trim())}
         >
-          Enregistrer
+          {t.common.save}
         </Button>
         <Button type="button" variant="ghost" onClick={onDone}>
-          Annuler
+          {t.common.cancel}
         </Button>
       </div>
     </form>
@@ -177,6 +179,7 @@ function NewRuleForm({ mailDomain, onDone }: { mailDomain: string; onDone: () =>
 }
 
 export function ForwardingSettings() {
+  const { t } = useI18n();
   const config = useConfig();
   const rules = useForwardRules();
   const [adding, setAdding] = useState(false);
@@ -190,18 +193,15 @@ export function ForwardingSettings() {
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-6">
       <header className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Redirections</h1>
+        <h1 className="text-lg font-semibold">{t.forwarding.title}</h1>
         {!adding && mailDomain !== undefined && (
           <Button type="button" onClick={() => setAdding(true)}>
-            Ajouter une redirection
+            {t.forwarding.add}
           </Button>
         )}
       </header>
 
-      <p className="text-sm text-muted-foreground">
-        Toutes les règles qui correspondent à une adresse s'appliquent : un message reçu peut
-        partir vers plusieurs destinations. Il reste dans tous les cas archivé dans Cloudmail.
-      </p>
+      <p className="text-sm text-muted-foreground">{t.forwarding.intro}</p>
 
       {/* Distinct de l'état vide, et non silencieux : une installation dont la
           migration 0002 n'a pas été appliquée reçoit un 500 sur cette route, et
@@ -209,17 +209,13 @@ export function ForwardingSettings() {
           ordre de marche. */}
       {rules.isError && (
         <p className="text-sm text-destructive">
-          Impossible de lire les redirections : {rules.error.message}. Si la fonctionnalité vient
-          d'être déployée, la migration <code>0002_forward_rules.sql</code> n'a peut-être pas été
-          appliquée sur la base D1 (voir l'étape 2 de la mise en service, dans le README).
+          {t.forwarding.readFailed(errorText(rules.error, t))} {t.forwarding.migrationHintBefore}{" "}
+          <code>0002_forward_rules.sql</code> {t.forwarding.migrationHintAfter}
         </p>
       )}
 
       {config.isError && (
-        <p className="text-sm text-destructive">
-          Le domaine de messagerie n'a pas pu être lu : les adresses sources seraient incomplètes,
-          les redirections ne sont donc pas affichées. Rechargez la page.
-        </p>
+        <p className="text-sm text-destructive">{t.forwarding.configFailed}</p>
       )}
 
       {mailDomain !== undefined && (
@@ -227,7 +223,7 @@ export function ForwardingSettings() {
           {adding && <NewRuleForm mailDomain={mailDomain} onDone={() => setAdding(false)} />}
 
           {rules.isSuccess && rules.data.length === 0 && (
-            <p className="text-sm text-muted-foreground">Aucune redirection.</p>
+            <p className="text-sm text-muted-foreground">{t.forwarding.empty}</p>
           )}
 
           <ul>
