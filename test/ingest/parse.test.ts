@@ -81,6 +81,24 @@ describe("parseEmail", () => {
     expect(m.messageId).toMatch(/@cloudmail\.local>$/);
     expect(m.messageIdSynthetic).toBe(true);
   });
+
+  it("signale une date réelle comme non synthétique", async () => {
+    const m = await parseEmail(await load("simple.eml"), "zoe@example.com");
+    expect(m.dateSynthetic).toBe(false);
+  });
+
+  it("signale la date inventée d'un message illisible", async () => {
+    const m = await parseEmail(await load("malformed.eml"), "zoe@example.com");
+    expect(m.dateSynthetic).toBe(true);
+  });
+
+  it("signale la date inventée d'un message sans en-tête Date", async () => {
+    const raw = new TextEncoder().encode(
+      "From: zoe@example.com\r\nTo: thomas@example.com\r\nSubject: Sans date\r\n\r\nBonjour\r\n"
+    ).buffer as ArrayBuffer;
+    const m = await parseEmail(raw, "zoe@example.com");
+    expect(m.dateSynthetic).toBe(true);
+  });
 });
 
 describe("normalizeSubject", () => {

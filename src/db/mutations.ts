@@ -156,6 +156,7 @@ export async function storeOutgoing(env: Env, req: SendRequest, messageId: strin
   const parsedLike = {
     messageId,
     messageIdSynthetic: false,
+    dateSynthetic: false,
     inReplyTo: req.inReplyTo ?? null,
     references: req.references ?? [],
     from: { address: req.from, name: null },
