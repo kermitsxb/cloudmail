@@ -102,6 +102,49 @@ describe("purgeExpiredTrash", () => {
     expect(await exists(newer.id)).toBe(true);
   });
 
+  it("ne purge pas un message restauré pendant le passage (course entre la sélection et la purge)", async () => {
+    // Deux messages expirés sélectionnés ensemble. Entre la sélection initiale et le passage
+    // de la boucle sur le premier, on simule une restauration concurrente (l'utilisateur sort
+    // le message de la corbeille) en la déclenchant juste après le SELECT initial.
+    const restored = await insertMessage({ folder: "trash", trashedAt: NOW - 40 * DAY });
+    const other = await insertMessage({ folder: "trash", trashedAt: NOW - 35 * DAY });
+
+    const wrappedDB = new Proxy(env.DB, {
+      get(target, prop, receiver) {
+        if (prop !== "prepare") return Reflect.get(target, prop, receiver);
+        return (sql: string) => {
+          const stmt = target.prepare(sql);
+          if (!sql.startsWith("SELECT id FROM messages")) return stmt;
+          return new Proxy(stmt, {
+            get(stmtTarget, stmtProp, stmtReceiver) {
+              if (stmtProp !== "bind") return Reflect.get(stmtTarget, stmtProp, stmtReceiver);
+              return (...args: unknown[]) => {
+                const bound = stmtTarget.bind(...args);
+                return new Proxy(bound, {
+                  get(boundTarget, boundProp, boundReceiver) {
+                    if (boundProp !== "all") return Reflect.get(boundTarget, boundProp, boundReceiver);
+                    return async <T = unknown>() => {
+                      const result = await boundTarget.all<T>();
+                      await target.prepare("UPDATE messages SET folder = 'inbox', trashed_at = NULL WHERE id = ?")
+                        .bind(restored.id).run();
+                      return result;
+                    };
+                  },
+                });
+              };
+            },
+          });
+        };
+      },
+    });
+
+    const res = await purgeExpiredTrash({ ...workerEnv, DB: wrappedDB }, NOW, 30);
+
+    expect(res).toEqual({ purged: 1, failed: 0, remaining: 0 });
+    expect(await exists(restored.id)).toBe(true);
+    expect(await exists(other.id)).toBe(false);
+  });
+
   it("continue après l'échec d'un message et le garde pour le prochain passage", async () => {
     const bad = await insertMessage({ folder: "trash", trashedAt: NOW - 40 * DAY });
     const good = await insertMessage({ folder: "trash", trashedAt: NOW - 39 * DAY });

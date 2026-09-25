@@ -38,6 +38,18 @@ export async function purgeExpiredTrash(
   let failed = 0;
   for (const { id } of rows.results) {
     try {
+      // Les ids ont été sélectionnés une fois avant la boucle ; entre cette sélection et le
+      // tour de boucle courant, l'utilisateur a pu restaurer ce message précis (ou le remettre
+      // à la corbeille assez récemment). purgeMessage ne revérifie pas le dossier lui-même, donc
+      // on revérifie ici, juste avant de purger, que le message est toujours un message expiré
+      // de la corbeille ; sinon on le laisse de côté sans le compter ni comme purgé ni comme en
+      // échec.
+      const stillExpired = await env.DB
+        .prepare(`SELECT 1 ${expired} AND id = ?`)
+        .bind(cutoff, id)
+        .first();
+      if (!stillExpired) continue;
+
       if (await purgeMessage(env, id)) purged++;
     } catch (err) {
       failed++;
