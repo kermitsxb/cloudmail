@@ -45,6 +45,10 @@
     // Domaine utilisé pour générer le Message-ID des emails envoyés (voir
     // src/api/routes.ts). Placeholder ici ; le domaine réel vit dans
     // wrangler.overrides.json (ignoré par git).
-    "MAIL_DOMAIN": "example.com"
+    "MAIL_DOMAIN": "example.com",
+    // Jours avant qu'un message de la corbeille soit supprimé définitivement par la
+    // maintenance planifiée. "0" désactive la purge. Surchargeable dans
+    // wrangler.overrides.json.
+    "TRASH_RETENTION_DAYS": "30"
   }
 }

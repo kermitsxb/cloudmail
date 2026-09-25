@@ -12,5 +12,8 @@ export interface Env {
   ACCESS_AUD: string;
   ALLOWED_EMAILS: string;
   MAIL_DOMAIN: string;
+  // Jours de conservation de la corbeille avant purge planifiée. "0", absente ou invalide :
+  // purge désactivée (voir retentionDays dans src/maintenance/trash.ts).
+  TRASH_RETENTION_DAYS?: string;
   DEV_BYPASS_AUTH?: string;
 }
