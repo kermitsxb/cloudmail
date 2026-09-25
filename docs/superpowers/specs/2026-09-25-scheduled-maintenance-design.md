@@ -77,6 +77,7 @@ CREATE INDEX idx_messages_trashed_at ON messages(folder, trashed_at);
 CREATE TABLE maintenance_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ran_at INTEGER NOT NULL,          -- seconds, like received_at
+  trigger TEXT NOT NULL CHECK (trigger IN ('cron','manual')),
   trash_purged INTEGER,             -- NULL: purge not run (manual check, or disabled)
   trash_failed INTEGER,
   trash_remaining INTEGER,          -- expired messages left for the next run
@@ -119,8 +120,12 @@ CREATE TABLE maintenance_runs (
 
 - `recordRun(env, run)` inserts a `maintenance_runs` row, then deletes rows
   beyond the 30 most recent (`MAINTENANCE_RUNS_KEPT = 30`).
-- `lastRun(env)` returns the most recent row. If the table does not exist
-  (migration not applied), it returns `null` instead of throwing.
+- `latestRuns(env)` returns `{ lastRun, lastCheck }`: `lastRun` is the most
+  recent `cron` row (what the last night did), `lastCheck` the most recent row
+  of either trigger whose orphan check succeeded (`orphans_count IS NOT NULL`).
+  Two fields, because a manual check writes a row with empty trash columns
+  that must not hide the last purge. If the table does not exist (migration
+  not applied), both are `null` instead of throwing.
 - Every run also logs one line:
   `{ event: "maintenance", trigger: "cron" | "manual", trashPurged, trashFailed, trashRemaining, orphansCount, orphansComplete, error }`.
   If recording fails, the log line still goes out, with the recording error.
@@ -129,8 +134,9 @@ CREATE TABLE maintenance_runs (
 
 Both routes sit under `/api/admin/*`, behind `requireAccess()`.
 
-- `GET /api/admin/maintenance` → `{ retentionDays: number | null, lastRun: MaintenanceRun | null }`.
-  `lastRun` is the latest row with camelCase fields and `orphansSample` parsed.
+- `GET /api/admin/maintenance` →
+  `{ retentionDays: number | null, lastRun: MaintenanceRun | null, lastCheck: MaintenanceRun | null }`
+  (see `latestRuns`), camelCase fields, `orphansSample` parsed.
 - `POST /api/admin/maintenance/orphan-check` → runs **only** task 2, records a
   row with the trash columns `NULL`, returns that row. The purge is never
   triggerable from the UI. The route exists so that the badge is not stale
@@ -146,12 +152,12 @@ Both routes sit under `/api/admin/*`, behind `requireAccess()`.
 
 A "Scheduled maintenance" card at the top of `MaintenanceSettings`:
 
-- **Never run** when `lastRun` is `null`.
-- Otherwise: date of the last run; trash line ("12 messages deleted",
-  failures and remaining when non-zero, "Automatic purge disabled" when the
-  purge did not run); orphans line ("None", "3 orphaned messages", or
-  "10 000+ (partial check)"); and a **Re-run the check** button calling the
-  POST route.
+- Last scheduled run (`lastRun`): "Never run" when `null`; otherwise its
+  date, the trash line ("12 messages deleted", failures and remaining when
+  non-zero; nothing when the purge did not run), and its `error` if any.
+- Orphans (`lastCheck`): "Storage never checked" when `null`; otherwise
+  "None", "3 orphaned messages" or "More than 10 000 (partial check)", with
+  the check date; and a **Re-run the check** button calling the POST route.
 - Retention in effect: "Trash emptied after 30 days" or "Automatic purge
   disabled".
 
@@ -161,7 +167,7 @@ at least one message, the SPA re-runs the check and refreshes the
 
 ### Sidebar badge
 
-When the latest run's orphan count is above zero, a counter appears next to
+When `lastCheck.orphansCount` is above zero, a counter appears next to
 "Maintenance", with an `aria-label` ("3 orphaned messages detected"). One
 query when the app loads, no polling.
 
@@ -200,13 +206,15 @@ Every string goes through `useI18n().t`, in `fr.ts` and `en.ts`; dates through
 - One `purgeMessage` failure is counted and the others still go.
 - Orphan check across several pages; the page cap yields `complete = false`;
   sample capped at 20.
-- `recordRun` keeps 30 rows; `lastRun` returns `null` without the table.
+- `recordRun` keeps 30 rows; `latestRuns` separates the last cron run from
+  the last successful check, and returns `null`s without the table.
 - `scheduled()` through `createScheduledController`: records one run.
 - Both routes, including the storage failure path.
 
 **SPA (jsdom, `web/`)**
 
-- Status card: never run, no orphans, orphans, partial, purge disabled,
+- Status card: never run, never checked, no orphans, orphans, partial,
+  purge disabled,
   re-run button calls the route and refreshes.
 - Sidebar badge shown/hidden with the right `aria-label`.
 - Trash notice shown with the configured days, hidden when disabled.
