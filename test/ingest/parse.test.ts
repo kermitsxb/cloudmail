@@ -62,6 +62,25 @@ describe("parseEmail", () => {
     expect(m.from.address).toBe("inconnu@example.com");
     expect(m.messageId).toMatch(/^<[0-9a-f-]{36}@cloudmail\.local>$/);
   });
+
+  it("signale un Message-ID réel comme non synthétique", async () => {
+    const m = await parseEmail(await load("simple.eml"), "zoe@example.com");
+    expect(m.messageIdSynthetic).toBe(false);
+  });
+
+  it("signale le Message-ID inventé d'un message illisible", async () => {
+    const m = await parseEmail(await load("malformed.eml"), "zoe@example.com");
+    expect(m.messageIdSynthetic).toBe(true);
+  });
+
+  it("signale le Message-ID inventé d'un message sans en-tête Message-ID", async () => {
+    const raw = new TextEncoder().encode(
+      "From: zoe@example.com\r\nTo: thomas@example.com\r\nSubject: Sans identifiant\r\n\r\nBonjour\r\n"
+    ).buffer as ArrayBuffer;
+    const m = await parseEmail(raw, "zoe@example.com");
+    expect(m.messageId).toMatch(/@cloudmail\.local>$/);
+    expect(m.messageIdSynthetic).toBe(true);
+  });
 });
 
 describe("normalizeSubject", () => {
