@@ -199,6 +199,7 @@ export const fr = {
       invalid_body: "Requête invalide.",
       invalid_query: "Requête invalide.",
       not_found: "Élément introuvable : il a peut-être déjà été supprimé.",
+      purge_in_progress: "La suppression de ce message est en cours. Réessayez dans un instant.",
       duplicate_identity: "Cette identité existe déjà.",
       last_identity: "Impossible de supprimer la dernière identité restante.",
       duplicate_rule: "Cette redirection existe déjà.",

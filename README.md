@@ -123,8 +123,9 @@ pnpm run migrate:remote
 It's harmless when there's nothing new, and a missing migration fails
 silently — for example, forwarding just stops working, or moving messages
 between folders (trash, restore) fails. This release adds
-`migrations/0004_scheduled_maintenance.sql`, so `pnpm run migrate:remote`
-must run before `pnpm run deploy`.
+`migrations/0004_scheduled_maintenance.sql` and
+`migrations/0005_purge_claims.sql`, so `pnpm run migrate:remote` must run before
+`pnpm run deploy`.
 
 ### 3. Add your sending identity
 

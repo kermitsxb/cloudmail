@@ -50,7 +50,7 @@ export async function purgeExpiredTrash(
         .first();
       if (!stillExpired) continue;
 
-      if (await purgeMessage(env, id)) purged++;
+      if (await purgeMessage(env, id, cutoff)) purged++;
     } catch (err) {
       failed++;
       console.error(JSON.stringify({

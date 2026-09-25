@@ -187,6 +187,7 @@ export const en: Catalog = {
       invalid_body: "Invalid request.",
       invalid_query: "Invalid request.",
       not_found: "Not found: it may have been deleted already.",
+      purge_in_progress: "This message is being deleted. Try again in a moment.",
       duplicate_identity: "This identity already exists.",
       last_identity: "The last remaining identity cannot be deleted.",
       duplicate_rule: "This forwarding rule already exists.",

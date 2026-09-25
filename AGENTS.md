@@ -86,6 +86,14 @@ deleted when no other row still references its `raw_key` — two rows can share
 one when the same bytes were delivered twice under different synthetic
 message IDs.
 
+Before touching R2, a purge reserves the message's `raw_key` in
+`purge_claims` (migration `0005`). The reservation is inserted atomically with
+the scheduled purge's trash/age check. It blocks a concurrent restore and a
+second purge of the same raw object. The reservation is released after the
+attempt; if a Worker stops abruptly, a later purge can reclaim it after 24 h.
+The D1 message row is still deleted only after R2. A conflicting API request
+returns `409` with `purge_in_progress`.
+
 Deletion is two-step in the UI: `PATCH /api/messages/:id` with `folder:
 "trash"` moves to trash (restoring picks `inbox` or `sent` from the message
 direction); `DELETE /api/messages/:id` purges permanently.
@@ -278,7 +286,9 @@ the service public. The order encodes real constraints:
   moving any message between folders (trash, restore, inbox↔sent) returns
   500 — the `UPDATE` always writes `trashed_at`, a column that doesn't exist
   yet — and the nightly run logs a failure while the Maintenance view shows
-  "never run".
+  "never run". Without `0005`, any permanent deletion (manual or scheduled)
+  and any folder move returns 500 because the purge reservation table is
+  missing.
 
 ## Two test suites, don't mix them
 

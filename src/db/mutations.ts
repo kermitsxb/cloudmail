@@ -4,6 +4,15 @@ import { safeKey, snippetOf } from "../ingest/parse";
 import { sanitizeFilename } from "../ingest/store";
 import type { SendRequest } from "../send/client";
 
+export class PurgeInProgressError extends Error {
+  constructor() { super("Purge in progress"); }
+}
+
+// Un Worker interrompu peut laisser une réservation. Une invocation Cloudflare ne reste pas
+// active 24 h : le passage suivant pourra donc reprendre une purge interrompue sans que deux
+// purges vivantes utilisent simultanément la même clé R2.
+const PURGE_CLAIM_SECONDS = 86_400;
+
 export async function setRead(db: D1Database, messageId: number, isRead: boolean): Promise<boolean> {
   const row = await db
     .prepare("SELECT thread_id, folder, is_read FROM messages WHERE id = ?")
@@ -50,8 +59,9 @@ export async function moveToFolder(
       `UPDATE messages
           SET folder = ?1,
               trashed_at = CASE WHEN ?1 = 'trash' THEN unixepoch() ELSE NULL END
-        WHERE id = ?2`
-    ).bind(folder, messageId),
+        WHERE id = ?2 AND folder = ?3
+          AND NOT EXISTS (SELECT 1 FROM purge_claims WHERE raw_key = messages.raw_key)`
+    ).bind(folder, messageId, row.folder),
   ];
 
   // message_count et unread_count ne comptabilisent que les messages hors corbeille. Un
@@ -65,85 +75,121 @@ export async function moveToFolder(
         `UPDATE threads
             SET message_count = MAX(0, message_count + ?),
                 unread_count = MAX(0, unread_count + ?)
-          WHERE id = ?`
+          WHERE id = ? AND changes() = 1`
       ).bind(delta, unreadDelta, row.thread_id)
     );
   }
 
-  await db.batch(statements);
+  const [updated] = await db.batch(statements);
+  if (updated.meta.changes === 0) {
+    const claim = await db.prepare(
+      "SELECT 1 FROM purge_claims WHERE raw_key = (SELECT raw_key FROM messages WHERE id = ?)"
+    ).bind(messageId).first();
+    if (claim) throw new PurgeInProgressError();
+    return false;
+  }
   return true;
 }
 
-export async function purgeMessage(env: Env, messageId: number): Promise<boolean> {
-  const row = await env.DB
-    .prepare("SELECT thread_id, folder, is_read, raw_key FROM messages WHERE id = ?")
-    .bind(messageId)
-    .first<{ thread_id: number; folder: string; is_read: number; raw_key: string }>();
-  if (!row) return false;
-
-  const atts = await env.DB
-    .prepare("SELECT r2_key FROM attachments WHERE message_id = ?")
-    .bind(messageId)
-    .all<{ r2_key: string }>();
-
-  // Une clé de brut adressée par contenu (raw/<sha256>.eml) peut être partagée par deux lignes
-  // messages : deux livraisons aux octets strictement identiques, sans Message-Id (ou avec un
-  // Message-Id qui se retrouve dupliqué), reçoivent chacune un id synthétique distinct mais le
-  // même raw_key. Si on la supprimait quand même, purger l'une des deux lignes emporterait
-  // l'archive brute de l'autre encore présente — violerait "aucun message reçu n'est jamais
-  // perdu". On vérifie donc, avant de toucher R2, si une autre ligne référence encore ce
-  // raw_key ; si oui, on ne le supprime pas (les pièces jointes de ce message-ci, propres à sa
-  // ligne, sont supprimées comme d'habitude).
-  const sharedRaw = await env.DB
-    .prepare("SELECT 1 FROM messages WHERE raw_key = ? AND id <> ?")
-    .bind(row.raw_key, messageId)
-    .first();
-
-  // Ordre volontaire (retour sur décision) : on supprime d'abord les objets R2, puis la ligne
-  // D1. `R2Bucket#delete` est idempotent — répéter l'appel sur des clés déjà absentes ne fait
-  // rien — donc une purge interrompue après la suppression R2 mais avant la suppression D1 se
-  // rejoue simplement jusqu'au bout : la ligne D1 encore présente sert d'adresse pour ce rejeu.
-  // Si la suppression R2 échoue, on s'arrête sans toucher D1, pour ne jamais perdre l'adresse
-  // (raw_key/r2_key) du contenu qu'on n'a pas réussi à supprimer.
-  // L'ordre inverse (D1 avant R2) a été essayé puis rejeté : une fois la ligne messages
-  // supprimée, `raw_key` et `attachments.r2_key` disparaissent avec elle, et un objet R2
-  // orphelin résultant d'un échec R2 après coup n'est alors plus retrouvable qu'en balayant
-  // tout le bucket à la recherche de clés sans ligne correspondante — un échec silencieux et
-  // définitif sur du contenu de message potentiellement sensible. Le résidu temporaire de
-  // l'ordre retenu (une ligne D1 qui référence des objets déjà supprimés, le temps d'un rejeu)
-  // est au contraire visible (404 sur la pièce jointe ou le brut) et réparable en relançant la
-  // purge.
-  const keys = [...(sharedRaw ? [] : [row.raw_key]), ...atts.results.map((a) => a.r2_key)];
-  await env.MAIL.delete(keys);
-
-  // Un message déjà à la corbeille a déjà été retiré de message_count/unread_count par
-  // moveToFolder : ne pas les décrémenter une seconde fois ici.
-  const statements = [
-    env.DB.prepare("DELETE FROM attachments WHERE message_id = ?").bind(messageId),
-    env.DB.prepare("DELETE FROM recipients WHERE message_id = ?").bind(messageId),
-    env.DB.prepare("DELETE FROM messages WHERE id = ?").bind(messageId),
-  ];
-  if (row.folder !== "trash") {
-    statements.push(
-      env.DB.prepare(
-        `UPDATE threads
-            SET message_count = MAX(0, message_count - 1),
-                unread_count = MAX(0, unread_count - ?)
-          WHERE id = ?`
-      ).bind(row.is_read ? 0 : 1, row.thread_id)
-    );
-  }
-  await env.DB.batch(statements);
-
-  const remaining = await env.DB
-    .prepare("SELECT COUNT(*) AS n FROM messages WHERE thread_id = ?")
-    .bind(row.thread_id)
-    .first<{ n: number }>();
-  if ((remaining?.n ?? 0) === 0) {
-    await env.DB.prepare("DELETE FROM threads WHERE id = ?").bind(row.thread_id).run();
+export async function purgeMessage(
+  env: Env,
+  messageId: number,
+  expectedTrashBefore?: number,
+): Promise<boolean> {
+  // L'INSERT est atomique avec le contrôle d'éligibilité. Une restauration qui précède
+  // l'INSERT fait échouer la réservation ; une restauration qui suit rencontre la réservation
+  // dans moveToFolder. La clé primaire bloque aussi une autre purge du même brut partagé.
+  const [, claim] = await env.DB.batch([
+    env.DB.prepare("DELETE FROM purge_claims WHERE claimed_at < unixepoch() - ?").bind(PURGE_CLAIM_SECONDS),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO purge_claims (raw_key, message_id, claimed_at)
+       SELECT raw_key, id, unixepoch() FROM messages
+        WHERE id = ?1 AND (?2 IS NULL OR (folder = 'trash' AND trashed_at < ?2))`
+    ).bind(messageId, expectedTrashBefore ?? null),
+  ]);
+  if (claim.meta.changes === 0) {
+    const busy = await env.DB.prepare(
+      "SELECT 1 FROM purge_claims WHERE raw_key = (SELECT raw_key FROM messages WHERE id = ?)"
+    ).bind(messageId).first();
+    if (busy) throw new PurgeInProgressError();
+    return false;
   }
 
-  return true;
+  try {
+    const row = await env.DB
+      .prepare("SELECT thread_id, folder, is_read, raw_key FROM messages WHERE id = ?")
+      .bind(messageId)
+      .first<{ thread_id: number; folder: string; is_read: number; raw_key: string }>();
+    if (!row) return false;
+
+    const atts = await env.DB
+      .prepare("SELECT r2_key FROM attachments WHERE message_id = ?")
+      .bind(messageId)
+      .all<{ r2_key: string }>();
+
+    // Une clé de brut adressée par contenu (raw/<sha256>.eml) peut être partagée par deux lignes
+    // messages : deux livraisons aux octets strictement identiques, sans Message-Id (ou avec un
+    // Message-Id qui se retrouve dupliqué), reçoivent chacune un id synthétique distinct mais le
+    // même raw_key. Si on la supprimait quand même, purger l'une des deux lignes emporterait
+    // l'archive brute de l'autre encore présente — violerait "aucun message reçu n'est jamais
+    // perdu". On vérifie donc, avant de toucher R2, si une autre ligne référence encore ce
+    // raw_key ; si oui, on ne le supprime pas (les pièces jointes de ce message-ci, propres à sa
+    // ligne, sont supprimées comme d'habitude).
+    const sharedRaw = await env.DB
+      .prepare("SELECT 1 FROM messages WHERE raw_key = ? AND id <> ?")
+      .bind(row.raw_key, messageId)
+      .first();
+
+    // Ordre volontaire (retour sur décision) : on supprime d'abord les objets R2, puis la ligne
+    // D1. `R2Bucket#delete` est idempotent — répéter l'appel sur des clés déjà absentes ne fait
+    // rien — donc une purge interrompue après la suppression R2 mais avant la suppression D1 se
+    // rejoue simplement jusqu'au bout : la ligne D1 encore présente sert d'adresse pour ce rejeu.
+    // Si la suppression R2 échoue, on s'arrête sans toucher D1, pour ne jamais perdre l'adresse
+    // (raw_key/r2_key) du contenu qu'on n'a pas réussi à supprimer.
+    // L'ordre inverse (D1 avant R2) a été essayé puis rejeté : une fois la ligne messages
+    // supprimée, `raw_key` et `attachments.r2_key` disparaissent avec elle, et un objet R2
+    // orphelin résultant d'un échec R2 après coup n'est alors plus retrouvable qu'en balayant
+    // tout le bucket à la recherche de clés sans ligne correspondante — un échec silencieux et
+    // définitif sur du contenu de message potentiellement sensible. Le résidu temporaire de
+    // l'ordre retenu (une ligne D1 qui référence des objets déjà supprimés, le temps d'un rejeu)
+    // est au contraire visible (404 sur la pièce jointe ou le brut) et réparable en relançant la
+    // purge.
+    const keys = [...(sharedRaw ? [] : [row.raw_key]), ...atts.results.map((a) => a.r2_key)];
+    await env.MAIL.delete(keys);
+
+    // Un message déjà à la corbeille a déjà été retiré de message_count/unread_count par
+    // moveToFolder : ne pas les décrémenter une seconde fois ici.
+    const statements = [
+      env.DB.prepare("DELETE FROM attachments WHERE message_id = ?").bind(messageId),
+      env.DB.prepare("DELETE FROM recipients WHERE message_id = ?").bind(messageId),
+      env.DB.prepare("DELETE FROM messages WHERE id = ?").bind(messageId),
+    ];
+    if (row.folder !== "trash") {
+      statements.push(
+        env.DB.prepare(
+          `UPDATE threads
+              SET message_count = MAX(0, message_count - 1),
+                  unread_count = MAX(0, unread_count - ?)
+            WHERE id = ?`
+        ).bind(row.is_read ? 0 : 1, row.thread_id)
+      );
+    }
+    await env.DB.batch(statements);
+
+    const remaining = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM messages WHERE thread_id = ?")
+      .bind(row.thread_id)
+      .first<{ n: number }>();
+    if ((remaining?.n ?? 0) === 0) {
+      await env.DB.prepare("DELETE FROM threads WHERE id = ?").bind(row.thread_id).run();
+    }
+
+    return true;
+  } finally {
+    // En cas d'échec R2/D1, la ligne messages reste l'adresse du contenu et un prochain
+    // appel peut réessayer. Une interruption brutale est récupérée par l'expiration ci-dessus.
+    await env.DB.prepare("DELETE FROM purge_claims WHERE message_id = ?").bind(messageId).run();
+  }
 }
 
 // Stocke une copie d'un message sortant déjà envoyé avec succès (voir POST /messages dans

@@ -5,6 +5,7 @@ import { handleEmail } from "./email";
 import { requireAccess } from "./auth/access";
 import { api } from "./api/routes";
 import { runMaintenance } from "./maintenance/run";
+import { PurgeInProgressError } from "./db/mutations";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -49,6 +50,9 @@ app.route("/api", api);
 // répond { error: { code, message } }. Le détail interne (message d'exception, pile) n'est
 // pas divulgué au client — il part dans les logs du Worker, seule surface de diagnostic.
 app.onError((err, c) => {
+  if (err instanceof PurgeInProgressError) {
+    return c.json({ error: { code: "purge_in_progress", message: err.message } }, 409);
+  }
   console.error(JSON.stringify({
     event: "unhandled_error",
     path: new URL(c.req.url).pathname,
