@@ -7,6 +7,7 @@ import {
   type Orphan,
   type ReimportResult,
 } from "../api/client";
+import { useI18n } from "../i18n";
 import { outcomeLabel } from "../lib/reimport";
 import { Button } from "./ui/button";
 
@@ -23,6 +24,7 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
 // Messages présents dans R2 mais absents de la base : l'analyse parcourt tout le bucket page
 // par page, et une page en échec peut être reprise sans perdre les orphelins déjà trouvés.
 function OrphansPanel() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const [orphans, setOrphans] = useState<Orphan[]>([]);
   const [scanned, setScanned] = useState(false);
@@ -149,7 +151,7 @@ function OrphansPanel() {
                   </div>
                   {result && (
                     <span className={result.outcome === "error" || result.outcome === "not_found" ? "text-xs text-destructive" : "text-xs"}>
-                      {outcomeLabel(result)}
+                      {outcomeLabel(result, t)}
                     </span>
                   )}
                 </li>
@@ -164,6 +166,7 @@ function OrphansPanel() {
 
 // Messages que le parseur n'a pas compris : à réimporter après une correction du parseur.
 function ParseErrorsPanel() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const { data, error, isLoading } = useParseErrors();
   const [running, setRunning] = useState(false);
@@ -230,7 +233,7 @@ function ParseErrorsPanel() {
           <p>{`${succeeded} réanalysé(s), ${failures.length} échec(s)`}</p>
           <ul className="flex flex-col gap-1 text-xs text-destructive">
             {failures.map((r) => (
-              <li key={r.key}>{`${r.key} — ${outcomeLabel(r)}`}</li>
+              <li key={r.key}>{`${r.key} — ${outcomeLabel(r, t)}`}</li>
             ))}
           </ul>
         </div>

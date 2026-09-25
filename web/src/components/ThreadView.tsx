@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useReimportMessage, useThread, useUpdateMessage, type MessageDetail } from "../api/client";
+import { useI18n } from "../i18n";
 import { outcomeLabel } from "../lib/reimport";
 import { Composer } from "./Composer";
 import { MessageBody } from "./MessageBody";
@@ -42,6 +43,7 @@ function MessageItem({
   onToggle: () => void;
   onReply: () => void;
 }) {
+  const { t } = useI18n();
   const updateMessage = useUpdateMessage();
   const reimport = useReimportMessage();
 
@@ -135,7 +137,7 @@ function MessageItem({
           )}
           {reimport.data && reimport.data.outcome !== "reparsed" && reimport.data.outcome !== "imported" && (
             <p role="status" className="px-4 pb-2 text-xs text-destructive">
-              {outcomeLabel(reimport.data)}
+              {outcomeLabel(reimport.data, t)}
             </p>
           )}
         </div>
