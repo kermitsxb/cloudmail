@@ -209,7 +209,7 @@ export function ThreadView({ threadId }: { threadId: number }) {
       </ul>
 
       <Dialog open={replyingTo !== null} onOpenChange={(open) => !open && setReplyingTo(null)}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg" closeLabel={t.common.close}>
           <DialogHeader>
             <DialogTitle>{t.threadView.reply}</DialogTitle>
           </DialogHeader>
