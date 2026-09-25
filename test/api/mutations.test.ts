@@ -17,6 +17,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM purge_claims"),
     env.DB.prepare("DELETE FROM attachments"),
     env.DB.prepare("DELETE FROM recipients"),
     env.DB.prepare("DELETE FROM messages"),
@@ -176,6 +177,78 @@ describe("purgeMessage", () => {
     expect(await env.MAIL.get("raw/shared.eml")).not.toBeNull();
   });
 
+  it("empêche une restauration pendant la suppression R2", async () => {
+    await moveToFolder(env.DB, 1, "trash");
+    await env.MAIL.put("raw/m1.eml", "brut");
+    let entered!: () => void;
+    let release!: () => void;
+    const deleting = new Promise<void>((resolve) => { entered = resolve; });
+    const resume = new Promise<void>((resolve) => { release = resolve; });
+    const workerEnv = {
+      ...env,
+      MAIL: { delete: async (keys: string[]) => {
+        entered();
+        await resume;
+        return env.MAIL.delete(keys);
+      } },
+    } as unknown as Env;
+
+    const purge = purgeMessage(workerEnv, 1);
+    await deleting;
+    try {
+      await expect(moveToFolder(env.DB, 1, "inbox")).rejects.toThrow(/purge in progress/i);
+      const row = await env.DB.prepare("SELECT folder FROM messages WHERE id = 1").first<{ folder: string }>();
+      expect(row?.folder).toBe("trash");
+    } finally {
+      release();
+      await purge;
+    }
+    expect(await env.DB.prepare("SELECT id FROM messages WHERE id = 1").first()).toBeNull();
+  });
+
+  it("sérialise deux purges de messages partageant le même brut", async () => {
+    await env.DB.prepare("UPDATE messages SET raw_key = 'raw/shared.eml' WHERE id IN (1, 2)").run();
+    await env.MAIL.put("raw/shared.eml", "brut partagé");
+    let entered!: () => void;
+    let release!: () => void;
+    const deleting = new Promise<void>((resolve) => { entered = resolve; });
+    const resume = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const workerEnv = {
+      ...env,
+      MAIL: { delete: async (keys: string[]) => {
+        if (++calls === 1) {
+          entered();
+          await resume;
+        }
+        return env.MAIL.delete(keys);
+      } },
+    } as unknown as Env;
+
+    const first = purgeMessage(workerEnv, 1);
+    await deleting;
+    try {
+      await expect(purgeMessage(workerEnv, 2)).rejects.toThrow(/purge in progress/i);
+    } finally {
+      release();
+      await first;
+    }
+    expect(await env.MAIL.get("raw/shared.eml")).not.toBeNull();
+    expect(await purgeMessage(env as unknown as Env, 2)).toBe(true);
+    expect(await env.MAIL.get("raw/shared.eml")).toBeNull();
+  });
+
+  it("reprend une réservation abandonnée par un Worker interrompu", async () => {
+    await env.MAIL.put("raw/m1.eml", "brut");
+    await env.DB.prepare(
+      "INSERT INTO purge_claims (raw_key, message_id, claimed_at) VALUES ('raw/m1.eml', 1, unixepoch() - 86401)"
+    ).run();
+
+    expect(await purgeMessage(env as unknown as Env, 1)).toBe(true);
+    expect(await env.MAIL.get("raw/m1.eml")).toBeNull();
+    expect(await env.DB.prepare("SELECT id FROM messages WHERE id = 1").first()).toBeNull();
+  });
+
   it("supprime les objets R2 avant la ligne D1 : si R2 échoue, la ligne D1 reste intacte", async () => {
     await env.MAIL.put("raw/m1.eml", "brut");
     const wrappedEnv = {
@@ -192,6 +265,7 @@ describe("purgeMessage", () => {
 
     const m = await env.DB.prepare("SELECT id FROM messages WHERE id = 1").first();
     expect(m).not.toBeNull();
+    expect(await env.DB.prepare("SELECT raw_key FROM purge_claims WHERE message_id = 1").first()).toBeNull();
     const t = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = 1")
       .first<{ message_count: number; unread_count: number }>();
     expect(t).toMatchObject({ message_count: 2, unread_count: 2 });
@@ -226,6 +300,31 @@ describe("moveToFolder — trashed_at", () => {
 });
 
 describe("routes /api/messages/:id", () => {
+  it("répond 409 quand une purge réserve la clé du message", async () => {
+    await env.DB.prepare(
+      "INSERT INTO purge_claims (raw_key, message_id, claimed_at) VALUES ('raw/m1.eml', 1, unixepoch())"
+    ).run();
+
+    const patch = await app.request(
+      "https://example.com/api/messages/1",
+      { method: "PATCH", body: JSON.stringify({ folder: "trash" }), headers: { "Content-Type": "application/json" } },
+      { ...env, DEV_BYPASS_AUTH: "1" },
+    );
+    expect(patch.status).toBe(409);
+    expect(await patch.json()).toMatchObject({ error: { code: "purge_in_progress" } });
+    const thread = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = 1")
+      .first<{ message_count: number; unread_count: number }>();
+    expect(thread).toMatchObject({ message_count: 2, unread_count: 2 });
+
+    const remove = await app.request(
+      "https://example.com/api/messages/1",
+      { method: "DELETE" },
+      { ...env, DEV_BYPASS_AUTH: "1" },
+    );
+    expect(remove.status).toBe(409);
+    expect(await remove.json()).toMatchObject({ error: { code: "purge_in_progress" } });
+  });
+
   it("répond 401 sans jeton sur PATCH /api/messages/:id", async () => {
     const res = await app.request(
       "https://example.com/api/messages/1",
