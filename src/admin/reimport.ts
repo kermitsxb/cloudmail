@@ -1,11 +1,11 @@
 import type { Env } from "../env";
-import { parseEmail, snippetOf } from "../ingest/parse";
+import { parseEmail } from "../ingest/parse";
 import {
   attachmentStatements,
+  parsedColumns,
   putAttachments,
   recipientStatements,
   storeIncoming,
-  truncateBody,
 } from "../ingest/store";
 
 // Seules les clés de brut entrant sont réimportables. Les messages envoyés ont une clé
@@ -123,8 +123,10 @@ async function reparseInPlace(env: Env, rawKey: string, raw: ArrayBuffer, row: E
   const stored = await putAttachments(env, messageId, msg.attachments);
   const newKeys = stored.map((s) => s.r2Key);
 
-  const text = truncateBody(msg.text);
-  const html = truncateBody(msg.html);
+  // Même correspondance colonnes <- message parsé que storeIncoming (src/ingest/store.ts) :
+  // une ligne réanalysée doit porter exactement les valeurs qu'une ingestion neuve du même
+  // brut produirait.
+  const cols = parsedColumns(msg, messageId);
 
   try {
     await env.DB.batch([
@@ -135,10 +137,9 @@ async function reparseInPlace(env: Env, rawKey: string, raw: ArrayBuffer, row: E
                 parse_error = ?, body_truncated = ?
           WHERE id = ?`
       ).bind(
-        messageId, msg.inReplyTo, msg.from.address, msg.from.name, msg.subject,
-        text.value, html.value, snippetOf(msg.text || msg.subject), msg.date,
-        msg.attachments.length > 0 ? 1 : 0, msg.parseError ? 1 : 0,
-        text.truncated || html.truncated ? 1 : 0, row.id,
+        cols.messageId, cols.inReplyTo, cols.fromAddr, cols.fromName, cols.subject,
+        cols.textBody, cols.htmlBody, cols.snippet, cols.receivedAt, cols.hasAttachments,
+        cols.parseError, cols.bodyTruncated, row.id,
       ),
       env.DB.prepare("DELETE FROM recipients WHERE message_id = ?").bind(row.id),
       ...recipientStatements(env.DB, row.id, msg),

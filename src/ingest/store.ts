@@ -79,17 +79,35 @@ const sha256Hex = async (data: ArrayBuffer): Promise<string> => {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 };
 
-// État d'un message à l'insertion. Un message reçu arrive non lu dans la boîte de réception ;
-// reparse passe l'état de la ligne qu'il remplace pour que le rejeu ne le perde pas.
-export type IncomingState = { folder: "inbox" | "sent" | "trash"; isRead: boolean };
-
-const NEW_MESSAGE: IncomingState = { folder: "inbox", isRead: false };
+// Correspondance entre un message parsé et les colonnes qu'il alimente en base, partagée
+// par storeIncoming (nouvelle arrivée) et reparseInPlace (réanalyse d'une ligne existante,
+// src/admin/reimport.ts). Les deux appelants doivent produire la même ligne à partir du
+// même ParsedMessage ; centraliser cette correspondance ici empêche les deux de diverger.
+// `messageId` est pris à part (et non msg.messageId) car reparseInPlace peut choisir de
+// conserver l'identifiant déjà en base plutôt que celui, inventé, du nouveau parsing.
+export function parsedColumns(msg: ParsedMessage, messageId: string) {
+  const text = truncateBody(msg.text);
+  const html = truncateBody(msg.html);
+  return {
+    messageId,
+    inReplyTo: msg.inReplyTo,
+    fromAddr: msg.from.address,
+    fromName: msg.from.name,
+    subject: msg.subject,
+    textBody: text.value,
+    htmlBody: html.value,
+    snippet: snippetOf(msg.text || msg.subject),
+    receivedAt: msg.date,
+    hasAttachments: msg.attachments.length > 0 ? 1 : 0,
+    parseError: msg.parseError ? 1 : 0,
+    bodyTruncated: text.truncated || html.truncated ? 1 : 0,
+  };
+}
 
 export async function storeIncoming(
   env: Env,
   raw: ArrayBuffer,
   envelope: { from: string; to: string },
-  state: IncomingState = NEW_MESSAGE,
 ): Promise<StoreResult> {
   // La clé est dérivée du brut lui-même (SHA-256 des octets), pas du message
   // parsé : l'écriture R2 précède ainsi structurellement tout appel à
@@ -114,8 +132,7 @@ export async function storeIncoming(
 
   const { threadId, created } = await resolveThread(env.DB, msg, participants);
 
-  const text = truncateBody(msg.text);
-  const html = truncateBody(msg.html);
+  const cols = parsedColumns(msg, msg.messageId);
 
   // INSERT OR IGNORE plutôt qu'un INSERT sec : le SELECT d'idempotence ci-dessus ne
   // protège pas de deux livraisons concurrentes du même Message-ID (les deux passent le
@@ -128,12 +145,12 @@ export async function storeIncoming(
        (thread_id, message_id, in_reply_to, direction, folder, from_addr, from_name,
         subject, text_body, html_body, snippet, received_at, is_read, has_attachments, raw_key,
         parse_error, body_truncated)
-     VALUES (?, ?, ?, 'in', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, 'in', 'inbox', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
   ).bind(
-    threadId, msg.messageId, msg.inReplyTo, state.folder, msg.from.address, msg.from.name,
-    msg.subject, text.value, html.value, snippetOf(msg.text || msg.subject),
-    msg.date, state.isRead ? 1 : 0, msg.attachments.length > 0 ? 1 : 0, rawKey, msg.parseError ? 1 : 0,
-    text.truncated || html.truncated ? 1 : 0
+    threadId, cols.messageId, cols.inReplyTo, cols.fromAddr, cols.fromName,
+    cols.subject, cols.textBody, cols.htmlBody, cols.snippet,
+    cols.receivedAt, cols.hasAttachments, rawKey, cols.parseError,
+    cols.bodyTruncated
   ).run();
 
   if (inserted.meta.changes === 0) {
@@ -160,17 +177,16 @@ export async function storeIncoming(
     ...attachmentStatements(env.DB, messageId, stored),
   ];
 
-  // message_count et unread_count ne comptent que les messages hors corbeille (voir
-  // moveToFolder) : un message rejoué directement à la corbeille ne les fait pas varier.
-  const counted = state.folder !== "trash";
+  // Un message qui vient d'arriver est toujours non lu, dans la boîte de réception : les
+  // deux compteurs du thread progressent donc systématiquement d'une unité.
   statements.push(
     env.DB.prepare(
       `UPDATE threads
-         SET message_count = message_count + ?,
-             unread_count = unread_count + ?,
+         SET message_count = message_count + 1,
+             unread_count = unread_count + 1,
              last_message_at = MAX(last_message_at, ?)
        WHERE id = ?`
-    ).bind(counted ? 1 : 0, counted && !state.isRead ? 1 : 0, msg.date, threadId)
+    ).bind(msg.date, threadId)
   );
 
   await env.DB.batch(statements);
