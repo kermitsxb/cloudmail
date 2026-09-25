@@ -3,7 +3,10 @@ import { useState } from "react";
 import {
   fetchOrphans,
   reimportInBatches,
+  useMaintenance,
+  useOrphanCheck,
   useParseErrors,
+  type MaintenanceRun,
   type Orphan,
   type ReimportResult,
 } from "../api/client";
@@ -25,11 +28,72 @@ const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
 };
 const toDate = (value: string | number) => new Date(typeof value === "number" ? value * 1000 : value);
 
+const orphansLine = (run: MaintenanceRun, s: Catalog["maintenance"]["scheduled"]) => {
+  const count = run.orphansCount ?? 0;
+  if (run.orphansComplete === false) return s.orphansPartial(count);
+  return count === 0 ? s.orphansNone : s.orphansFound(count);
+};
+
+// Résultat du passage nocturne (purge de la corbeille) et de la dernière vérification des
+// orphelins, planifiée ou relancée ici. La purge n'est jamais déclenchable depuis l'interface.
+function ScheduledPanel() {
+  const { t, formatDate } = useI18n();
+  const s = t.maintenance.scheduled;
+  const { data, error, isLoading } = useMaintenance();
+  const check = useOrphanCheck();
+  const lastRun = data?.lastRun ?? null;
+  const lastCheck = data?.lastCheck ?? null;
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-base font-semibold">{s.title}</h2>
+      <p className="text-sm text-muted-foreground">{s.intro}</p>
+
+      {isLoading && <p className="text-sm text-muted-foreground">{t.common.loading}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{errorText(error, t)}</p>}
+
+      {data && (
+        <>
+          <p className="text-sm">{data.retentionDays ? s.retention(data.retentionDays) : s.retentionDisabled}</p>
+
+          {lastRun === null ? (
+            <p className="text-sm text-muted-foreground">{s.neverRun}</p>
+          ) : (
+            <div className="flex flex-col gap-1 text-sm">
+              <p>{s.lastRun(formatDate(toDate(lastRun.ranAt), DATE_OPTIONS))}</p>
+              {lastRun.trashPurged !== null && <p>{s.purged(lastRun.trashPurged)}</p>}
+              {!!lastRun.trashFailed && <p className="text-destructive">{s.purgeFailed(lastRun.trashFailed)}</p>}
+              {!!lastRun.trashRemaining && <p>{s.purgeRemaining(lastRun.trashRemaining)}</p>}
+              {lastRun.error && <p className="text-destructive">{s.runFailed(lastRun.error)}</p>}
+            </div>
+          )}
+
+          {lastCheck === null ? (
+            <p className="text-sm text-muted-foreground">{s.neverChecked}</p>
+          ) : (
+            <p className="text-sm">
+              {`${orphansLine(lastCheck, s)} — ${s.checkedAt(formatDate(toDate(lastCheck.ranAt), DATE_OPTIONS))}`}
+            </p>
+          )}
+
+          <div>
+            <Button type="button" variant="outline" onClick={() => check.mutate()} disabled={check.isPending}>
+              {check.isPending ? s.rechecking : s.recheck}
+            </Button>
+          </div>
+          {check.error && <p role="alert" className="text-sm text-destructive">{errorText(check.error, t)}</p>}
+        </>
+      )}
+    </section>
+  );
+}
+
 // Messages présents dans R2 mais absents de la base : l'analyse parcourt tout le bucket page
 // par page, et une page en échec peut être reprise sans perdre les orphelins déjà trouvés.
 function OrphansPanel() {
   const { t, formatDate } = useI18n();
   const qc = useQueryClient();
+  const recheck = useOrphanCheck();
   const [orphans, setOrphans] = useState<Orphan[]>([]);
   const [scanned, setScanned] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -78,20 +142,24 @@ function OrphansPanel() {
   const reimportSelected = async () => {
     setImporting(true);
     setError(null);
+    let imported = false;
     try {
-      await reimportInBatches([...selected], (batch) =>
+      await reimportInBatches([...selected], (batch) => {
+        if (batch.some((r) => r.outcome === "imported")) imported = true;
         setResults((prev) => {
           const next = new Map(prev);
           for (const r of batch) next.set(r.key, r);
           return next;
-        }),
-      );
+        });
+      });
       setSelected(new Set());
     } catch (err) {
       setError(err);
     } finally {
       setImporting(false);
       qc.invalidateQueries({ queryKey: ["threads"] });
+      // Le compte d'orphelins affiché (et le badge) serait sinon périmé jusqu'à la nuit suivante.
+      if (imported) recheck.mutate();
     }
   };
 
@@ -247,6 +315,7 @@ export function MaintenanceSettings() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8 p-6">
       <h1 className="text-lg font-semibold">{t.maintenance.title}</h1>
+      <ScheduledPanel />
       <OrphansPanel />
       <ParseErrorsPanel />
     </div>

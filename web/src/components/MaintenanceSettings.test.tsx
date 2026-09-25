@@ -25,12 +25,23 @@ type Stub = {
   failOrphanCursor?: string;
   parseErrors?: unknown[];
   reimport?: (keys: string[]) => unknown[];
+  maintenance?: unknown;
+  orphanCheck?: { status: number; body: unknown };
 };
 
 const stubApi = (opts: Stub) => {
   const posts: string[][] = [];
+  const calls: string[] = [];
   const failed = new Set<string>();
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push(`${init?.method ?? "GET"} ${url}`);
+    if (url === "/api/admin/maintenance/orphan-check") {
+      const r = opts.orphanCheck ?? { status: 200, body: {} };
+      return json(r.body, r.status);
+    }
+    if (url === "/api/admin/maintenance") {
+      return json(opts.maintenance ?? { retentionDays: 30, lastRun: null, lastCheck: null });
+    }
     if (url.startsWith("/api/admin/orphans")) {
       const cursor = new URL(url, "https://x").searchParams.get("cursor") ?? "";
       // Échoue une seule fois, pour tester la reprise.
@@ -50,7 +61,10 @@ const stubApi = (opts: Stub) => {
     }
     return json({});
   }));
-  return posts;
+  // `calls` non énumérable : les tests existants comparent `posts` par égalité structurelle
+  // (toEqual([[...]])), qui échouerait si une propriété supplémentaire apparaissait dessus.
+  Object.defineProperty(posts, "calls", { value: calls, enumerable: false });
+  return posts as string[][] & { calls: string[] };
 };
 
 describe("MaintenanceSettings — orphelins", () => {
@@ -152,5 +166,74 @@ describe("MaintenanceSettings — anglais", () => {
     render(<MaintenanceSettings />, { wrapper, locale: "en" });
     await userEvent.click(screen.getByRole("button", { name: "Scan storage" }));
     expect(await screen.findByText("No orphaned messages.")).toBeDefined();
+  });
+});
+
+const run = (over: Record<string, unknown> = {}) => ({
+  id: 1, ranAt: 1_790_000_000, trigger: "cron", trashPurged: null, trashFailed: null, trashRemaining: null,
+  orphansCount: 0, orphansComplete: true, orphansSample: [], error: null, ...over,
+});
+
+describe("MaintenanceSettings — maintenance planifiée", () => {
+  it("indique qu'aucun passage n'a encore eu lieu", async () => {
+    stubApi({});
+    render(<MaintenanceSettings />, { wrapper });
+    expect(await screen.findByText("Aucun passage planifié pour l'instant.")).toBeDefined();
+    expect(screen.getByText("Stockage jamais vérifié.")).toBeDefined();
+    expect(screen.getByText("La corbeille est vidée des messages de plus de 30 jours.")).toBeDefined();
+  });
+
+  it("résume le dernier passage et la dernière vérification", async () => {
+    stubApi({
+      maintenance: {
+        retentionDays: 30,
+        lastRun: run({ trashPurged: 12, trashFailed: 1, trashRemaining: 3 }),
+        lastCheck: run({ orphansCount: 3 }),
+      },
+    });
+    render(<MaintenanceSettings />, { wrapper });
+    expect(await screen.findByText("12 messages supprimés de la corbeille")).toBeDefined();
+    expect(screen.getByText("1 suppression en échec")).toBeDefined();
+    expect(screen.getByText("3 messages restent à supprimer au prochain passage")).toBeDefined();
+    expect(screen.getByText(/3 messages orphelins détectés/)).toBeDefined();
+  });
+
+  it("signale une vérification partielle", async () => {
+    stubApi({ maintenance: { retentionDays: 30, lastRun: null, lastCheck: run({ orphansCount: 4, orphansComplete: false }) } });
+    render(<MaintenanceSettings />, { wrapper });
+    expect(await screen.findByText(/Vérification partielle : 4 orphelins parmi les 10 000 premiers objets/)).toBeDefined();
+  });
+
+  it("indique une purge désactivée et l'erreur du dernier passage", async () => {
+    stubApi({ maintenance: { retentionDays: null, lastRun: run({ error: "orphans: R2 indisponible" }), lastCheck: null } });
+    render(<MaintenanceSettings />, { wrapper });
+    expect(await screen.findByText("Purge automatique de la corbeille désactivée.")).toBeDefined();
+    expect(screen.getByText("Erreur lors du passage : orphans: R2 indisponible")).toBeDefined();
+  });
+
+  it("relance la vérification et rafraîchit l'état", async () => {
+    const api = stubApi({ orphanCheck: { status: 200, body: run({ trigger: "manual" }) } });
+    render(<MaintenanceSettings />, { wrapper });
+    await userEvent.click(await screen.findByRole("button", { name: "Relancer la vérification" }));
+    await waitFor(() =>
+      expect(api.calls.filter((c) => c === "GET /api/admin/maintenance").length).toBeGreaterThanOrEqual(2),
+    );
+    expect(api.calls).toContain("POST /api/admin/maintenance/orphan-check");
+  });
+
+  it("affiche l'échec d'une vérification relancée", async () => {
+    stubApi({ orphanCheck: { status: 503, body: { error: { code: "storage_unavailable", message: "x" } } } });
+    render(<MaintenanceSettings />, { wrapper });
+    await userEvent.click(await screen.findByRole("button", { name: "Relancer la vérification" }));
+    expect(await screen.findByText("Stockage indisponible : réessayez dans un instant.")).toBeDefined();
+  });
+
+  it("relance la vérification après un réimport qui a importé un message", async () => {
+    const api = stubApi({ orphanPages: { "": { orphans: [orphan(1)], cursor: null } } });
+    render(<MaintenanceSettings />, { wrapper });
+    await userEvent.click(screen.getByRole("button", { name: "Analyser le stockage" }));
+    await userEvent.click(await screen.findByLabelText(`Sélectionner ${k(1)}`));
+    await userEvent.click(screen.getByRole("button", { name: "Réimporter la sélection (1)" }));
+    await waitFor(() => expect(api.calls).toContain("POST /api/admin/maintenance/orphan-check"));
   });
 });

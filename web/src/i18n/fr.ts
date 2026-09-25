@@ -131,6 +131,34 @@ export const fr = {
     title: "Maintenance",
     size: { bytes: "o", kilobytes: "Ko", megabytes: "Mo" },
     reimporting: "Réimport en cours…",
+    scheduled: {
+      title: "Maintenance planifiée",
+      intro:
+        "Chaque nuit, Cloudmail vide la corbeille des anciens messages et vérifie qu'aucun message reçu ne manque à la boîte.",
+      retention: (days: number) =>
+        `La corbeille est vidée des messages de plus de ${days} ${plural.select(days) === "one" ? "jour" : "jours"}.`,
+      retentionDisabled: "Purge automatique de la corbeille désactivée.",
+      neverRun: "Aucun passage planifié pour l'instant.",
+      lastRun: (date: string) => `Dernier passage : ${date}`,
+      purged: (n: number) =>
+        plural.select(n) === "one" ? `${n} message supprimé de la corbeille` : `${n} messages supprimés de la corbeille`,
+      purgeFailed: (n: number) =>
+        `${n} ${plural.select(n) === "one" ? "suppression en échec" : "suppressions en échec"}`,
+      purgeRemaining: (n: number) =>
+        plural.select(n) === "one"
+          ? `${n} message reste à supprimer au prochain passage`
+          : `${n} messages restent à supprimer au prochain passage`,
+      runFailed: (detail: string) => `Erreur lors du passage : ${detail}`,
+      neverChecked: "Stockage jamais vérifié.",
+      orphansNone: "Aucun message orphelin.",
+      orphansFound: (n: number) =>
+        plural.select(n) === "one" ? `${n} message orphelin détecté` : `${n} messages orphelins détectés`,
+      orphansPartial: (n: number) =>
+        `Vérification partielle : ${n} ${plural.select(n) === "one" ? "orphelin" : "orphelins"} parmi les 10 000 premiers objets`,
+      checkedAt: (date: string) => `vérifié le ${date}`,
+      recheck: "Relancer la vérification",
+      rechecking: "Vérification…",
+    },
     orphans: {
       title: "Messages orphelins",
       intro:
