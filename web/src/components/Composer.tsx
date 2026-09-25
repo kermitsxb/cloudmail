@@ -235,7 +235,7 @@ export function Composer({
           aria-label={t.composer.to}
           value={to}
           onChange={(e) => setTo(e.target.value)}
-          placeholder="zoe@example.com, bob@example.com"
+          placeholder={t.composer.toPlaceholder}
         />
       </div>
 

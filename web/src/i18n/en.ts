@@ -65,6 +65,7 @@ export const en: Catalog = {
   composer: {
     from: "From",
     to: "To",
+    toPlaceholder: "zoe@example.com, bob@example.com",
     subject: "Subject",
     message: "Message",
     attachments: "Attachments",

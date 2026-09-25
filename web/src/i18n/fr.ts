@@ -66,6 +66,7 @@ export const fr = {
   composer: {
     from: "De",
     to: "Destinataires",
+    toPlaceholder: "zoe@example.com, bob@example.com",
     subject: "Objet",
     message: "Message",
     attachments: "Pièces jointes",
