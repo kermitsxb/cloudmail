@@ -1,6 +1,8 @@
 import { env, applyD1Migrations } from "cloudflare:test";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { listOrphans, listParseErrors } from "../../src/admin/reimport";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { listOrphans, listParseErrors, reimportKey } from "../../src/admin/reimport";
+import { storeIncoming } from "../../src/ingest/store";
+import { moveToFolder, setRead } from "../../src/db/mutations";
 
 interface TestEnv {
   TEST_FIXTURES: Record<string, string>;
@@ -125,5 +127,204 @@ describe("listParseErrors", () => {
     const second = await listParseErrors(env, { cursor: Number(first.cursor), limit: 1 });
     expect(second.messages.map((m) => m.id)).toEqual([a]);
     expect(second.cursor).toBeNull();
+  });
+});
+
+// Ingère un brut comme le ferait handleEmail, sans redirection.
+const ingest = async (raw: ArrayBuffer) => {
+  const res = await storeIncoming(env, raw, { from: "zoe@example.com", to: "thomas@example.com" });
+  return { id: res.messageId!, rawKey: res.rawKey };
+};
+
+const messageRow = (id: number) =>
+  env.DB.prepare(
+    "SELECT id, message_id, thread_id, folder, is_read, subject, parse_error FROM messages WHERE id = ?"
+  ).bind(id).first<{
+    id: number; message_id: string; thread_id: number; folder: string;
+    is_read: number; subject: string | null; parse_error: number;
+  }>();
+
+const threadTotals = () =>
+  env.DB.prepare("SELECT COUNT(*) AS n, SUM(message_count) AS mc, SUM(unread_count) AS uc FROM threads")
+    .first<{ n: number; mc: number; uc: number }>();
+
+const countMessages = async () =>
+  (await env.DB.prepare("SELECT COUNT(*) AS n FROM messages").first<{ n: number }>())!.n;
+
+const NO_MESSAGE_ID = "From: zoe@example.com\r\nTo: thomas@example.com\r\nSubject: Sans identifiant\r\n\r\nBonjour\r\n";
+
+describe("reimportKey — orphelins", () => {
+  it("importe un orphelin comme un message neuf, non lu, en boîte de réception", async () => {
+    const raw = loadBytes("simple.eml");
+    const key = await rawKeyOf(raw);
+    await env.MAIL.put(key, raw);
+
+    const result = await reimportKey(env, key, "dev@localhost");
+
+    expect(result).toMatchObject({ key, outcome: "imported" });
+    const id = (result as { messageIds: number[] }).messageIds[0];
+    expect(await messageRow(id)).toMatchObject({ folder: "inbox", is_read: 0, message_id: "<simple-1@example.com>" });
+  });
+
+  it("signale en doublon un orphelin dont le Message-ID existe déjà sous un autre brut", async () => {
+    const first = await ingest(loadBytes("simple.eml"));
+    // Même message, octets différents (un en-tête Received de plus) : autre clé, même Message-ID.
+    const copy = textBytes(`Received: from relay.example.com\r\n${new TextDecoder().decode(loadBytes("simple.eml"))}`);
+    const key = await rawKeyOf(copy);
+    await env.MAIL.put(key, copy);
+
+    const result = await reimportKey(env, key, "dev@localhost");
+
+    expect(result).toEqual({ key, outcome: "duplicate", messageIds: [first.id] });
+    expect(await countMessages()).toBe(1);
+  });
+
+  it("renvoie not_found quand l'objet R2 n'existe pas", async () => {
+    const key = `raw/${"0".repeat(64)}.eml`;
+    expect(await reimportKey(env, key, "dev@localhost")).toEqual({ key, outcome: "not_found" });
+  });
+});
+
+describe("reimportKey — réanalyse sur place", () => {
+  it("remplace le contenu issu du parsing et conserve id, thread, dossier et état lu", async () => {
+    const msg = await ingest(loadBytes("simple.eml"));
+    await setRead(env.DB, msg.id, true);
+    // Simule un ancien parsing défectueux.
+    await env.DB.prepare("UPDATE messages SET subject = 'ancien', parse_error = 1 WHERE id = ?").bind(msg.id).run();
+    const before = await messageRow(msg.id);
+    const totalsBefore = await threadTotals();
+
+    const result = await reimportKey(env, msg.rawKey, "dev@localhost");
+
+    expect(result).toEqual({ key: msg.rawKey, outcome: "reparsed", messageIds: [msg.id] });
+    expect(await messageRow(msg.id)).toMatchObject({
+      id: msg.id,
+      thread_id: before!.thread_id,
+      folder: "inbox",
+      is_read: 1,
+      subject: "Facture réglée",
+      parse_error: 0,
+    });
+    expect(await threadTotals()).toEqual(totalsBefore);
+    expect(await countMessages()).toBe(1);
+  });
+
+  it("laisse un message de la corbeille à la corbeille sans toucher aux compteurs", async () => {
+    const msg = await ingest(loadBytes("simple.eml"));
+    await moveToFolder(env.DB, msg.id, "trash");
+    const totalsBefore = await threadTotals();
+
+    await reimportKey(env, msg.rawKey, "dev@localhost");
+
+    expect(await messageRow(msg.id)).toMatchObject({ folder: "trash", is_read: 0 });
+    expect(await threadTotals()).toEqual(totalsBefore);
+  });
+
+  it("ne duplique pas un message dont le Message-ID a été inventé", async () => {
+    const msg = await ingest(loadBytes("malformed.eml"));
+    const before = await messageRow(msg.id);
+
+    const result = await reimportKey(env, msg.rawKey, "dev@localhost");
+
+    expect(result).toMatchObject({ outcome: "reparsed", messageIds: [msg.id] });
+    expect(await countMessages()).toBe(1);
+    expect((await messageRow(msg.id))!.message_id).toBe(before!.message_id);
+  });
+
+  it("réanalyse chaque ligne qui partage le même brut", async () => {
+    // Deux livraisons identiques d'un message sans Message-ID : même clé, deux lignes.
+    const a = await ingest(textBytes(NO_MESSAGE_ID));
+    const b = await ingest(textBytes(NO_MESSAGE_ID));
+    expect(a.rawKey).toBe(b.rawKey);
+    const ids = [(await messageRow(a.id))!.message_id, (await messageRow(b.id))!.message_id];
+
+    const result = await reimportKey(env, a.rawKey, "dev@localhost");
+
+    expect(result).toMatchObject({ outcome: "reparsed", messageIds: [a.id, b.id] });
+    expect(await countMessages()).toBe(2);
+    expect([(await messageRow(a.id))!.message_id, (await messageRow(b.id))!.message_id]).toEqual(ids);
+  });
+
+  it("supprime les anciennes pièces jointes remplacées, après validation", async () => {
+    const msg = await ingest(loadBytes("attachment.eml"));
+    // Simule une pièce jointe rangée sous une clé que le nouveau parsing ne produit plus.
+    await env.MAIL.put("att/ancien/0-vieux.csv", "x");
+    await env.DB.prepare("UPDATE attachments SET r2_key = 'att/ancien/0-vieux.csv' WHERE message_id = ?").bind(msg.id).run();
+
+    await reimportKey(env, msg.rawKey, "dev@localhost");
+
+    expect(await env.MAIL.head("att/ancien/0-vieux.csv")).toBeNull();
+    const att = await env.DB.prepare("SELECT r2_key FROM attachments WHERE message_id = ?").bind(msg.id).first<{ r2_key: string }>();
+    expect(att!.r2_key).toBe("att/att-1-example.com/0-data.csv");
+    expect(await env.MAIL.head(att!.r2_key)).not.toBeNull();
+  });
+
+  it("échoue sans rien modifier quand le nouveau Message-ID appartient à un autre message", async () => {
+    const msg = await ingest(loadBytes("simple.eml"));
+    await env.DB.prepare("UPDATE messages SET message_id = '<ancien@example.com>' WHERE id = ?").bind(msg.id).run();
+    const other = await insertRow({ rawKey: "raw/autre.eml", messageId: "<simple-1@example.com>" });
+
+    const result = await reimportKey(env, msg.rawKey, "dev@localhost");
+
+    expect(result).toMatchObject({ key: msg.rawKey, outcome: "error" });
+    expect((result as { error: string }).error).toContain(`#${other}`);
+    expect((await messageRow(msg.id))!.message_id).toBe("<ancien@example.com>");
+  });
+
+  it("nettoie les pièces jointes écrites si le lot D1 échoue", async () => {
+    const msg = await ingest(loadBytes("attachment.eml"));
+    // Ancienne clé différente de celle que le nouveau parsing va écrire.
+    await env.DB.batch([
+      env.DB.prepare("UPDATE messages SET message_id = '<att-ancien@example.com>' WHERE id = ?").bind(msg.id),
+      env.DB.prepare("UPDATE attachments SET r2_key = 'att/att-ancien-example.com/0-data.csv' WHERE message_id = ?").bind(msg.id),
+    ]);
+    await env.MAIL.put("att/att-ancien-example.com/0-data.csv", "a,b,c");
+    await env.MAIL.delete("att/att-1-example.com/0-data.csv");
+    const failingDb = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === "batch") return async () => { throw new Error("D1 indisponible"); };
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const result = await reimportKey({ ...env, DB: failingDb }, msg.rawKey, "dev@localhost");
+
+    expect(result).toMatchObject({ outcome: "error", error: "D1 indisponible" });
+    expect(await env.MAIL.head("att/att-1-example.com/0-data.csv")).toBeNull();
+    expect(await env.MAIL.head("att/att-ancien-example.com/0-data.csv")).not.toBeNull();
+  });
+});
+
+describe("reimportKey — garanties", () => {
+  it("ne lit ni ne modifie les règles de redirection", async () => {
+    await env.DB.prepare(
+      "INSERT INTO forward_rules (match_local, destination, enabled, created_at) VALUES ('*', 'ext@example.com', 1, 0)"
+    ).run();
+    const raw = loadBytes("simple.eml");
+    const key = await rawKeyOf(raw);
+    await env.MAIL.put(key, raw);
+
+    await reimportKey(env, key, "dev@localhost");
+
+    const rule = await env.DB.prepare("SELECT last_attempt_at FROM forward_rules").first<{ last_attempt_at: number | null }>();
+    expect(rule!.last_attempt_at).toBeNull();
+  });
+
+  it("ne supprime jamais le brut", async () => {
+    const msg = await ingest(loadBytes("simple.eml"));
+    await reimportKey(env, msg.rawKey, "dev@localhost");
+    expect(await env.MAIL.head(msg.rawKey)).not.toBeNull();
+  });
+
+  it("journalise chaque réimport avec son auteur", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const key = `raw/${"0".repeat(64)}.eml`;
+
+    await reimportKey(env, key, "dev@localhost");
+
+    const lines = log.mock.calls.map(([line]) => JSON.parse(String(line)));
+    expect(lines).toContainEqual({ event: "reimport", key, outcome: "not_found", by: "dev@localhost" });
+    log.mockRestore();
   });
 });

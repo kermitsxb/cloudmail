@@ -1,7 +1,6 @@
 import { env, applyD1Migrations } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { FORWARD_TIMEOUT_MS, handleEmail, reparse } from "../src/email";
-import { moveToFolder, setRead } from "../src/db/mutations";
+import { FORWARD_TIMEOUT_MS, handleEmail } from "../src/email";
 
 interface TestEnv {
   TEST_FIXTURES: Record<string, string>;
@@ -68,122 +67,6 @@ describe("handleEmail", () => {
     expect(msg.setReject).not.toHaveBeenCalled();
     const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM messages").first<{ n: number }>();
     expect(n?.n).toBe(0);
-  });
-});
-
-describe("reparse", () => {
-  it("rejoue un message depuis R2 sans le dupliquer ni gonfler durablement les compteurs de threads", async () => {
-    const msg = fakeMessage("simple.eml");
-    await handleEmail(msg, env);
-    const row = await env.DB.prepare("SELECT raw_key, thread_id FROM messages LIMIT 1")
-      .first<{ raw_key: string; thread_id: number }>();
-    expect(row).not.toBeNull();
-
-    await reparse(env, row!.raw_key, "zoe@example.com");
-
-    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM messages").first<{ n: number }>();
-    expect(n?.n).toBe(1);
-
-    // Sans participant restant dans l'ancien thread, resolveThread ne peut
-    // plus le retrouver : le message rejoué atterrit dans un nouveau thread.
-    // Ce qui compte est que la somme des compteurs sur l'ensemble des
-    // threads reste cohérente avec le nombre réel de messages (pas de
-    // gonflement dû à un double incrément).
-    const totals = await env.DB.prepare(
-      "SELECT SUM(message_count) AS mc, SUM(unread_count) AS uc FROM threads"
-    ).first<{ mc: number; uc: number }>();
-    expect(totals).toMatchObject({ mc: 1, uc: 1 });
-  });
-
-  // Ingère simple.eml et renvoie sa ligne, pour les tests de rejeu ci-dessous.
-  const ingestSimple = async () => {
-    await handleEmail(fakeMessage("simple.eml"), env);
-    return (await env.DB.prepare("SELECT id, raw_key, thread_id FROM messages LIMIT 1")
-      .first<{ id: number; raw_key: string; thread_id: number }>())!;
-  };
-
-  const threadRows = () =>
-    env.DB.prepare("SELECT id, message_count, unread_count FROM threads ORDER BY id")
-      .all<{ id: number; message_count: number; unread_count: number }>()
-      .then((r) => r.results);
-
-  it("supprime l'ancien thread resté vide quand le message rejoué y était seul", async () => {
-    const row = await ingestSimple();
-
-    await reparse(env, row.raw_key, "zoe@example.com");
-
-    const threads = await threadRows();
-    expect(threads).toHaveLength(1);
-    expect(threads[0]).toMatchObject({ message_count: 1, unread_count: 1 });
-  });
-
-  it("conserve l'ancien thread s'il contient d'autres messages", async () => {
-    const row = await ingestSimple();
-    // Un second message, lu, dans le même thread.
-    await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO messages (thread_id, message_id, direction, folder, from_addr, received_at, is_read, raw_key)
-         VALUES (?, 'autre@example.com', 'in', 'inbox', 'zoe@example.com', 0, 1, 'raw/autre.eml')`
-      ).bind(row.thread_id),
-      env.DB.prepare("UPDATE threads SET message_count = message_count + 1 WHERE id = ?").bind(row.thread_id),
-    ]);
-
-    await reparse(env, row.raw_key, "zoe@example.com");
-
-    const old = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = ?")
-      .bind(row.thread_id)
-      .first<{ message_count: number; unread_count: number }>();
-    expect(old).not.toBeNull();
-    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE thread_id = ?")
-      .bind(row.thread_id)
-      .first<{ n: number }>();
-    expect(old!.message_count).toBe(n!.n);
-  });
-
-  it("conserve le dossier et l'état lu du message rejoué", async () => {
-    const row = await ingestSimple();
-    await setRead(env.DB, row.id, true);
-
-    await reparse(env, row.raw_key, "zoe@example.com");
-
-    const replayed = await env.DB.prepare("SELECT folder, is_read, thread_id FROM messages LIMIT 1")
-      .first<{ folder: string; is_read: number; thread_id: number }>();
-    expect(replayed).toMatchObject({ folder: "inbox", is_read: 1 });
-    const thread = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = ?")
-      .bind(replayed!.thread_id)
-      .first<{ message_count: number; unread_count: number }>();
-    expect(thread).toMatchObject({ message_count: 1, unread_count: 0 });
-  });
-
-  it("rejoue un message de la corbeille sans toucher aux compteurs d'un thread qui a d'autres messages", async () => {
-    const row = await ingestSimple();
-    // Un second message non lu dans le même thread, puis le premier part à la corbeille :
-    // le thread ne compte plus que le second (message_count 1, unread_count 1).
-    await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO messages (thread_id, message_id, direction, folder, from_addr, received_at, is_read, raw_key)
-         VALUES (?, 'autre@example.com', 'in', 'inbox', 'zoe@example.com', 0, 0, 'raw/autre.eml')`
-      ).bind(row.thread_id),
-      env.DB.prepare(
-        "UPDATE threads SET message_count = message_count + 1, unread_count = unread_count + 1 WHERE id = ?"
-      ).bind(row.thread_id),
-    ]);
-    await moveToFolder(env.DB, row.id, "trash");
-
-    await reparse(env, row.raw_key, "zoe@example.com");
-
-    const replayed = await env.DB.prepare("SELECT folder, is_read FROM messages WHERE message_id != 'autre@example.com'")
-      .first<{ folder: string; is_read: number }>();
-    expect(replayed).toMatchObject({ folder: "trash", is_read: 0 });
-    // Aucun thread ne compte le message à la corbeille ; l'autre message reste compté.
-    const totals = await env.DB.prepare(
-      "SELECT SUM(message_count) AS mc, SUM(unread_count) AS uc FROM threads"
-    ).first<{ mc: number; uc: number }>();
-    expect(totals).toMatchObject({ mc: 1, uc: 1 });
-  });
-
-  it("lève si l'objet R2 est introuvable", async () => {
-    await expect(reparse(env, "raw/inexistant.eml", "zoe@example.com")).rejects.toThrow();
   });
 });
 
