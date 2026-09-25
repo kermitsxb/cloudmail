@@ -16,7 +16,8 @@ One Worker, three roles:
   Routing, forwards it, then runs the ingestion pipeline (`src/ingest/`:
   MIME parsing, storage, threading).
 - **HTTP API** (`src/api/routes.ts`, Hono) under `/api/*` — threads, messages,
-  attachments, raw MIME, identities, forwarding rules and destinations, config.
+  attachments, raw MIME, identities, forwarding rules and destinations, config,
+  admin re-import (`src/admin/reimport.ts`).
 - **Static SPA** (`web/`, built into `web/dist`, served through the `ASSETS`
   binding) for every other route, with SPA fallback. `run_worker_first`
   covers `/api/*` and `/healthz`.
@@ -43,9 +44,9 @@ The raw MIME is written to R2 **before** any parsing or D1 write. A later
 failure (D1 insert rejected, unmigrated database, ingestion bug) therefore
 leaves an R2 object with no `messages` row rather than losing the mail. The
 cost of this choice: such orphans are silent (see "Raw MIME storage"). The
-README's "R2 ↔ D1 reconciliation" section is the manual procedure to find them;
-**no admin route is shipped, deliberately** — a route that lists or replays
-message content deserves its own design and review cycle.
+Maintenance view (`GET /api/admin/orphans`, `src/admin/reimport.ts`) finds
+them by listing `raw/` through the R2 binding and diffing each page against
+D1; they are recovered by re-importing them.
 
 ### Forwarding is isolated from archiving
 
@@ -98,35 +99,37 @@ with `rm -rf .wrangler/state/v3/d1 .wrangler/state/v3/r2` then
 
 The raw MIME key is content-addressed: `raw/<sha256-of-content>.eml` — no
 timestamp, no message ID; two byte-identical messages share a key. The D1
-`messages` row is the **only** known address of that object: there is no
-reverse index, and `wrangler r2 object` has no listing subcommand (only `get`,
-`put`, `delete` in wrangler 4.x). Listing `raw/` requires R2's S3-compatible API.
+`messages` row is the **only** known address of that object:
+`messages.raw_key` is indexed (`idx_messages_raw_key`) for lookups by key.
+Inside the Worker, the R2 binding lists `raw/` (`env.MAIL.list`); from a
+terminal, `wrangler r2 object` has no listing subcommand, so listing requires
+R2's S3-compatible API.
 
-## Replaying a message (`reparse`)
+## Re-importing a message (`src/admin/reimport.ts`)
 
-`reparse(env, rawKey, envelopeFrom)` in `src/email.ts` re-reads a stored raw
-MIME, re-parses it, deletes the existing D1 row and calls `storeIncoming` as
-if the message had just arrived. It also works on an orphan (no row to delete,
-inserted as a new unread inbox message). Use it after a parser fix.
+`reimportKey(env, rawKey, by)` turns a stored raw MIME back into a message.
+It is exposed through `POST /api/admin/reimport` (1 to 10 keys, each matching
+`^raw/[0-9a-f]{64}\.eml$`) and the SPA's Maintenance view and message
+"Réimporter" action. It never throws: each key gets its own outcome
+(`imported`, `reparsed`, `duplicate`, `not_found`, `error`) and one
+`{ event: "reimport", …, by }` log line.
 
-- **It keeps the message's folder and read state**: they are passed to
-  `storeIncoming` as `state`. Thread counters only count messages outside the
-  trash, so a trashed message is neither decremented on delete nor counted on
-  re-insert — same rule as `moveToFolder` and `purgeMessage`.
-- **It deletes the old thread if it ends up empty**, in the same batch as the
-  row delete. Threading uses the normalized subject and reference headers, not
-  the old `thread_id`, and subject matching joins on `messages`, so an empty
-  thread is never picked again: without this, a message alone in its thread
-  left an empty thread behind. SQLite may reuse the deleted thread's id for the
-  new one (no `AUTOINCREMENT`) — don't rely on ids to tell them apart.
-- **It does not replay forwarding** — external recipients already got their
-  copy; re-forwarding would send a duplicate.
-- **It has no entry point**: no route, script or command calls it. To use it,
-  add a temporary authenticated route in `src/api/routes.ts` (through
-  `requireAccess()`), run `pnpm wrangler dev --remote` so it hits the real
-  remote D1/R2 rather than Miniflare, trigger it, then **remove the route
-  before committing**. Never deploy such a route: it's a destructive
-  delete-then-reinsert with no safeguard beyond generic Access auth.
+- **No row for the key (orphan)**: `storeIncoming`, exactly like new mail —
+  inbox, unread, normal threading, envelope sender `unknown@invalid`. If its
+  `Message-ID` already belongs to another row (same mail delivered twice with
+  different bytes), the outcome is `duplicate` and the orphan stays.
+- **Rows exist**: each is re-parsed **in place**, in one atomic D1 batch.
+  Only parse-derived columns, recipients and attachments are rewritten; `id`,
+  `thread_id`, `folder`, `is_read`, `direction` and `raw_key` never are, so
+  thread counters never move and no thread is ever emptied. Rows are found by
+  `raw_key`, not by the freshly parsed `Message-ID`: an invented ID
+  (`messageIdSynthetic`) changes on every parse, and looking it up used to
+  insert a duplicate. An invented ID never overwrites the stored one.
+- **Attachment order**: new objects are written before the batch; old keys
+  absent from the new set are deleted after it commits; if the batch fails,
+  new keys absent from the old set are deleted.
+- **It never forwards**, never touches `forward_rules`, and never deletes a
+  raw MIME object.
 
 ## Never commit a value specific to one installation
 
@@ -246,8 +249,8 @@ the service public. The order encodes real constraints:
 ## Two test suites, don't mix them
 
 - `pnpm vitest run` at the root: the Worker, in the Workers runtime (Miniflare
-  provides D1 and R2). 20 files.
-- `pnpm --filter web test`: the SPA, in jsdom. 8 files.
+  provides D1 and R2). 22 files.
+- `pnpm --filter web test`: the SPA, in jsdom. 10 files.
 
 `pnpm test` runs both in sequence. `pnpm typecheck` only covers the Worker:
 only `pnpm build` typechecks the SPA (`tsc -b`), so a typing error in `web/`
