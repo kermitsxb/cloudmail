@@ -137,6 +137,26 @@ It is exposed through `POST /api/admin/reimport` (1 to 10 keys, each matching
 - **It never forwards**, never touches `forward_rules`, and never deletes a
   raw MIME object.
 
+## Scheduled maintenance (`src/maintenance/`)
+
+One Cron Trigger (`triggers.crons` in `wrangler.jsonc`; the free plan allows
+only one) calls `scheduled()` → `runMaintenance`, which never throws:
+
+- **Trash purge** (`trash.ts`): messages with `folder = 'trash'` and
+  `trashed_at` older than `TRASH_RETENTION_DAYS`, oldest first, at most 100
+  per run, each through `purgeMessage` — never a direct delete, so the R2-then-D1
+  order holds. `trashed_at` is set and cleared only by `moveToFolder`, the
+  single path into the trash; keep it that way. A missing or invalid
+  retention value disables the purge rather than deleting anything.
+- **Orphan check** (`orphans.ts`): counts `raw/` objects with no row, up to
+  20 pages of `listOrphans`. It reports only — never re-imports, never
+  deletes. Recovery stays a user action.
+- Each run is one `maintenance_runs` row (last 30 kept) and one
+  `{ event: "maintenance" }` log line. `GET /api/admin/maintenance` returns
+  the last `cron` row (`lastRun`) and the last successful check of either
+  trigger (`lastCheck`). `POST /api/admin/maintenance/orphan-check` runs the
+  check only; the purge is never reachable from the API.
+
 ## Never commit a value specific to one installation
 
 This repository is open source and meant to be cloned and deployed by other
@@ -191,6 +211,7 @@ Everything read by `Env` (`src/env.ts`):
 | `ACCESS_AUD` | secret | `wrangler secret put` | unused (bypass) | `src/auth/access.ts` — JWT audience |
 | `ALLOWED_EMAILS` | secret | `wrangler secret put` | unused (bypass) | `src/auth/access.ts` — comma-separated allow-list |
 | `MAIL_DOMAIN` | var | `wrangler.overrides.json` → `vars` | `wrangler.jsonc` placeholder | `src/api/routes.ts` — `Message-ID` domain, `GET /api/config` |
+| `TRASH_RETENTION_DAYS` | var | `wrangler.jsonc` default `"30"`, override in `wrangler.overrides.json` | `wrangler.jsonc` | `src/maintenance/trash.ts` — trash retention; `0`/missing/invalid disables the purge |
 | `DEV_BYPASS_AUTH` | var | **never** | `.dev.vars` (`=1`) | `src/auth/access.ts` — skips Access, identity `dev@localhost` |
 
 The two API tokens are deliberately separate (least privilege): a leaked
@@ -250,13 +271,15 @@ the service public. The order encodes real constraints:
   deploying a version with a new migration.** Skipping it breaks nothing
   visibly: e.g. without `forward_rules`, `GET /api/forwarding/rules` returns
   500 and incoming mail logs `forward_rules_failed`, archived but never
-  forwarded.
+  forwarded. Without `0004`, the nightly run logs a failure and the Maintenance view
+  shows "never run"; moving a message to the trash returns 500 (missing
+  `trashed_at`).
 
 ## Two test suites, don't mix them
 
 - `pnpm vitest run` at the root: the Worker, in the Workers runtime (Miniflare
-  provides D1 and R2). 22 files.
-- `pnpm --filter web test`: the SPA, in jsdom. 13 files.
+  provides D1 and R2). 26 files.
+- `pnpm --filter web test`: the SPA, in jsdom. 14 files.
 
 `pnpm test` runs both in sequence. `pnpm typecheck` only covers the Worker:
 only `pnpm build` typechecks the SPA (`tsc -b`), so a typing error in `web/`
