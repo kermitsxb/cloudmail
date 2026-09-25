@@ -232,7 +232,7 @@ describe("routes /api/messages/:id", () => {
       { ...env, DEV_BYPASS_AUTH: "1" }
     );
     const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toBe("Fournir isRead ou folder");
+    expect(body.error.message).toBe("Provide isRead or folder");
   });
 
   it("répond 400 pour un identifiant non numérique via PATCH", async () => {

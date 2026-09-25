@@ -53,7 +53,7 @@ app.onError((err, c) => {
     path: new URL(c.req.url).pathname,
     error: err instanceof Error ? err.message : String(err),
   }));
-  return c.json({ error: { code: "internal_error", message: "Erreur interne" } }, 500);
+  return c.json({ error: { code: "internal_error", message: "Internal error" } }, 500);
 });
 
 export { app };

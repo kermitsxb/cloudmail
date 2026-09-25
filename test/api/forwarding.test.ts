@@ -80,19 +80,20 @@ describe("POST /api/forwarding/rules", () => {
     expect((await res.json() as { error: { code: string } }).error.code).toBe("invalid_body");
   });
 
-  it("renvoie un message d'erreur français lisible, pas un dump JSON de zod", async () => {
+  it("renvoie un message d'erreur lisible, pas un dump JSON de zod", async () => {
     stubDestinations(["gmail@exemple.com"]);
     const res = await postRule({ matchLocal: "contact", destination: "pas-un-email" });
-    const body = (await res.json()) as { error: { message: string } };
+    const body = (await res.json()) as { error: { message: string; reason?: string } };
     expect(body.error.message.startsWith("[{")).toBe(false);
-    expect(body.error.message).toContain("Requête invalide");
+    expect(body.error.message).toContain("Invalid request");
+    expect(body.error.reason).toBeUndefined();
   });
 
-  it("garde le message écrit à la main pour une partie locale invalide", async () => {
+  it("signale une partie locale invalide par une raison dédiée", async () => {
     stubDestinations(["gmail@exemple.com"]);
     const res = await postRule({ matchLocal: "a b", destination: "gmail@exemple.com" });
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toBe("Partie locale invalide");
+    const body = (await res.json()) as { error: { code: string; reason?: string } };
+    expect(body.error).toMatchObject({ code: "invalid_body", reason: "invalid_local_part" });
   });
 
   it("refuse une destination non vérifiée", async () => {
@@ -171,7 +172,7 @@ describe("PATCH et DELETE /api/forwarding/rules/:id", () => {
     const body = (await res.json()) as { error: { message: string } };
     expect(res.status).toBe(400);
     expect(body.error.message.startsWith("[{")).toBe(false);
-    expect(body.error.message).toContain("Requête invalide");
+    expect(body.error.message).toContain("Invalid request");
   });
 });
 

@@ -63,7 +63,7 @@ describe("app.onError (contrat d'erreur uniforme)", () => {
     expect(res.headers.get("content-type")).toContain("application/json");
     const body = await res.json<{ error: { code: string; message: string } }>();
     expect(body.error.code).toBe("internal_error");
-    expect(body.error.message).toBe("Erreur interne");
+    expect(body.error.message).toBe("Internal error");
   });
 
   it("ne divulgue pas le détail interne de l'exception", async () => {

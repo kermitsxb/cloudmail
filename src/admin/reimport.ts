@@ -135,7 +135,7 @@ async function reparseInPlace(env: Env, rawKey: string, raw: ArrayBuffer, row: E
   if (messageId !== row.message_id) {
     const clash = await env.DB.prepare("SELECT id FROM messages WHERE message_id = ? AND id != ?")
       .bind(messageId, row.id).first<{ id: number }>();
-    if (clash) throw new Error(`Message-ID déjà utilisé par le message #${clash.id}`);
+    if (clash) throw new Error(`Message-ID already used by message #${clash.id}`);
   }
 
   // R2 d'abord, sous des clés propres à cet essai : une panne D1 ne peut pas

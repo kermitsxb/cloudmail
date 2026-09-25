@@ -33,7 +33,7 @@ const patchBody = z.object({
   isRead: z.boolean().optional(),
   folder: z.enum(["inbox", "sent", "trash"]).optional(),
 }).refine((b) => b.isRead !== undefined || b.folder !== undefined, {
-  message: "Fournir isRead ou folder",
+  message: "Provide isRead or folder",
 });
 
 const sendBody = z.object({
@@ -55,15 +55,17 @@ const sendBody = z.object({
 // Le jeu de caractères est celui des adresses non citées du RFC 5322 : suffisant
 // pour tout ce qui s'écrit en pratique, et assez restreint pour qu'aucune valeur
 // acceptée ici ne puisse être confondue avec la sentinelle.
+// Le message est un repli en anglais destiné au développeur ; l'interface affiche sa
+// propre traduction à partir de la `reason` posée ici via `params`.
+const INVALID_LOCAL_PART = { message: "Invalid local part", params: { reason: "invalid_local_part" } };
+
 const forwardRuleBody = z.object({
   matchLocal: z
     .string()
     .trim()
     .max(64)
     .transform((v) => v.toLowerCase())
-    .refine((v) => v === CATCH_ALL || /^[a-z0-9._%+-]+$/.test(v), {
-      message: "Partie locale invalide",
-    }),
+    .refine((v) => v === CATCH_ALL || /^[a-z0-9._%+-]+$/.test(v), INVALID_LOCAL_PART),
   destination: z.string().email(),
 });
 
@@ -79,7 +81,7 @@ const identityBody = z.object({
     .trim()
     .max(64)
     .transform((v) => v.toLowerCase())
-    .refine((v) => /^[a-z0-9._%+-]+$/.test(v), { message: "Partie locale invalide" }),
+    .refine((v) => /^[a-z0-9._%+-]+$/.test(v), INVALID_LOCAL_PART),
   displayName: z.string().trim().max(200).optional(),
 });
 
@@ -87,7 +89,7 @@ const identityPatchBody = z.object({
   displayName: z.string().trim().max(200).nullable().optional(),
   isDefault: z.boolean().optional(),
 }).refine((b) => b.displayName !== undefined || b.isDefault !== undefined, {
-  message: "Fournir displayName ou isDefault",
+  message: "Provide displayName or isDefault",
 });
 
 // Un lot de réimport reste petit : chaque clé coûte plusieurs sous-requêtes R2 et D1, et
@@ -97,31 +99,31 @@ const REIMPORT_MAX_KEYS = 10;
 const orphansQuery = z.object({ cursor: z.string().min(1).max(1024).optional() });
 
 const parseErrorsQuery = z.object({
-  cursor: z.string().refine((v) => /^\d{1,15}$/.test(v), { message: "Curseur invalide" }).optional(),
+  cursor: z.string().refine((v) => /^\d{1,15}$/.test(v), { message: "Invalid cursor" }).optional(),
 });
 
 const reimportBody = z.object({
   keys: z.array(z.string()).min(1).max(REIMPORT_MAX_KEYS).refine(
     (keys) => keys.every((k) => RAW_KEY_PATTERN.test(k)),
-    { message: "Clé invalide : seuls les bruts de messages reçus (raw/<sha256>.eml) sont réimportables" },
+    { message: "Invalid key: only raw incoming messages (raw/<sha256>.eml) can be re-imported" },
   ),
 });
 
-// `ZodError.message` est un JSON.stringify des issues (en anglais) : impossible
-// à afficher tel quel à l'utilisateur, qui verrait un dump de la sérialisation
-// interne de zod plutôt qu'une phrase compréhensible. Ce helper construit à la
-// place un message en français, à partir des chemins de champs en erreur.
-//
-// Exception : les issues de code `custom` portent le message passé à
-// `.refine()`, donc rédigé ici même, en français et pour l'utilisateur. Une
-// formulation générique par chemin de champ serait un recul par rapport à elles
-// — moins précise, et laissant fuiter un nom de champ anglais dans de la prose
-// française. On les préfère donc dès qu'il en existe une.
-const formatValidationError = (error: z.ZodError): string => {
-  const rediges = error.issues.filter((issue) => issue.code === "custom").map((issue) => issue.message);
-  if (rediges.length > 0) return rediges.join(" ; ");
-  const champs = error.issues.map((issue) => issue.path.join(".") || "le corps de la requête");
-  return `Requête invalide : vérifiez ${champs.join(", ")}.`;
+// Erreur de validation renvoyée au client. Le `message` est un repli en anglais,
+// destiné au développeur : l'interface affiche sa propre traduction à partir du
+// `code` et, quand elle existe, de la `reason` — posée via `params` sur les
+// `.refine()` qu'un utilisateur peut déclencher depuis un formulaire. Les issues
+// `custom` portent un message rédigé ici même, plus précis qu'une formulation
+// générique par chemin de champ : on les préfère dès qu'il en existe une.
+const validationError = (error: z.ZodError): { message: string; reason?: string } => {
+  const custom = error.issues.filter((issue) => issue.code === "custom");
+  const reason = custom
+    .map((issue) => (issue as { params?: { reason?: unknown } }).params?.reason)
+    .find((r): r is string => typeof r === "string");
+  const message = custom.length > 0
+    ? custom.map((issue) => issue.message).join("; ")
+    : `Invalid request: check ${error.issues.map((issue) => issue.path.join(".") || "the request body").join(", ")}.`;
+  return reason ? { message, reason } : { message };
 };
 
 // Réponse 503 commune aux deux routes qui interrogent la liste des destinations
@@ -131,7 +133,7 @@ const routingUnavailableResponse = () =>
   Response.json({
     error: {
       code: "routing_unavailable",
-      message: "Impossible de lire les destinations vérifiées du compte Cloudflare",
+      message: "Could not read the verified destinations of the Cloudflare account",
     },
   }, { status: 503 });
 
@@ -146,7 +148,7 @@ const storageUnavailableResponse = (path: string, err: unknown) => {
   return Response.json({
     error: {
       code: "storage_unavailable",
-      message: "Impossible de lire le stockage des messages. Réessayez dans un instant.",
+      message: "Could not read message storage. Try again in a moment.",
     },
   }, { status: 503 });
 };
@@ -168,16 +170,16 @@ export const api = new Hono<ApiEnv>();
 api.get("/threads", async (c) => {
   const parsed = listQuery.safeParse(c.req.query());
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_query", message: formatValidationError(parsed.error) } }, 400);
+    return c.json({ error: { code: "invalid_query", ...validationError(parsed.error) } }, 400);
   }
   return c.json(await listThreads(c.env.DB, parsed.data));
 });
 
 api.get("/threads/:id", async (c) => {
   const id = Number(c.req.param("id"));
-  if (!Number.isInteger(id)) return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+  if (!Number.isInteger(id)) return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
   const thread = await getThread(c.env.DB, id);
-  if (!thread) return c.json({ error: { code: "not_found", message: "Thread introuvable" } }, 404);
+  if (!thread) return c.json({ error: { code: "not_found", message: "Thread not found" } }, 404);
   return c.json(thread);
 });
 
@@ -186,14 +188,14 @@ api.get("/identities", async (c) => c.json(await listIdentities(c.env.DB)));
 api.post("/identities", async (c) => {
   const parsed = identityBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
+    return c.json({ error: { code: "invalid_body", ...validationError(parsed.error) } }, 400);
   }
 
   const address = `${parsed.data.localPart}@${c.env.MAIL_DOMAIN}`;
   const identity = await createIdentity(c.env.DB, { address, displayName: parsed.data.displayName ?? null });
   if (!identity) {
     return c.json({
-      error: { code: "duplicate_identity", message: "Cette identité existe déjà" },
+      error: { code: "duplicate_identity", message: "Identity already exists" },
     }, 409);
   }
   return c.json(identity, 201);
@@ -202,11 +204,11 @@ api.post("/identities", async (c) => {
 api.patch("/identities/:address", async (c) => {
   const parsed = identityPatchBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
+    return c.json({ error: { code: "invalid_body", ...validationError(parsed.error) } }, 400);
   }
   const found = await updateIdentity(c.env.DB, c.req.param("address"), parsed.data);
   if (!found) {
-    return c.json({ error: { code: "not_found", message: "Identité introuvable" } }, 404);
+    return c.json({ error: { code: "not_found", message: "Identity not found" } }, 404);
   }
   return c.json({ ok: true });
 });
@@ -214,11 +216,11 @@ api.patch("/identities/:address", async (c) => {
 api.delete("/identities/:address", async (c) => {
   const result = await deleteIdentity(c.env.DB, c.req.param("address"));
   if (result === "not_found") {
-    return c.json({ error: { code: "not_found", message: "Identité introuvable" } }, 404);
+    return c.json({ error: { code: "not_found", message: "Identity not found" } }, 404);
   }
   if (result === "last") {
     return c.json({
-      error: { code: "last_identity", message: "Impossible de supprimer la dernière identité restante" },
+      error: { code: "last_identity", message: "Cannot delete the last remaining identity" },
     }, 409);
   }
   return c.json({ ok: true });
@@ -240,7 +242,7 @@ api.post("/messages", async (c) => {
   const identity = await c.env.DB.prepare("SELECT display_name FROM identities WHERE address = ?")
     .bind(parsed.data.from).first<{ display_name: string | null }>();
   if (!identity) {
-    return c.json({ error: { code: "unknown_sender", message: "Expéditeur inconnu" } }, 400);
+    return c.json({ error: { code: "unknown_sender", message: "Unknown sender" } }, 400);
   }
 
   // Reconstitue la chaîne References à partir du message parent, quand il est connu localement.
@@ -255,7 +257,7 @@ api.post("/messages", async (c) => {
   // Vérifié aussi côté client (sendEmail) : le refus explicite ici avec le code 413 donne un
   // statut HTTP clair à l'appelant, avant même de tenter l'appel réseau.
   if (payloadSize(req) > MAX_PAYLOAD_BYTES) {
-    return c.json({ error: { code: "too_large", message: "Le message dépasse 5 MiB" } }, 413);
+    return c.json({ error: { code: "too_large", message: "Message exceeds 5 MiB" } }, 413);
   }
 
   let result;
@@ -264,7 +266,7 @@ api.post("/messages", async (c) => {
   } catch (err) {
     const status = err instanceof SendError ? err.status : 502;
     return c.json(
-      { error: { code: "send_failed", message: err instanceof Error ? err.message : "Échec de l'envoi" } },
+      { error: { code: "send_failed", message: err instanceof Error ? err.message : "Send failed" } },
       status as 400 | 413 | 429 | 502
     );
   }
@@ -280,11 +282,11 @@ api.post("/messages", async (c) => {
 api.patch("/messages/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id)) {
-    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+    return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
   }
   const parsed = patchBody.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
+    return c.json({ error: { code: "invalid_body", ...validationError(parsed.error) } }, 400);
   }
   // Non atomique entre les deux appels : quand isRead et folder sont fournis ensemble,
   // setRead et moveToFolder s'exécutent dans deux `batch` D1 indépendants. Un échec entre les
@@ -294,20 +296,20 @@ api.patch("/messages/:id", async (c) => {
   let ok = true;
   if (parsed.data.isRead !== undefined) ok = await setRead(c.env.DB, id, parsed.data.isRead);
   if (ok && parsed.data.folder !== undefined) ok = await moveToFolder(c.env.DB, id, parsed.data.folder);
-  if (!ok) return c.json({ error: { code: "not_found", message: "Message introuvable" } }, 404);
+  if (!ok) return c.json({ error: { code: "not_found", message: "Message not found" } }, 404);
   return c.json({ ok: true });
 });
 
 api.get("/messages/:id/body", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id)) {
-    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+    return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
   }
 
   const msg = await c.env.DB.prepare("SELECT html_body, text_body FROM messages WHERE id = ?")
     .bind(id)
     .first<{ html_body: string | null; text_body: string | null }>();
-  if (!msg) return c.json({ error: { code: "not_found", message: "Message introuvable" } }, 404);
+  if (!msg) return c.json({ error: { code: "not_found", message: "Message not found" } }, 404);
   if (!msg.html_body) {
     return c.json({ html: null, text: msg.text_body ?? "", hasRemoteImages: false });
   }
@@ -328,10 +330,10 @@ api.get("/messages/:id/body", async (c) => {
 api.delete("/messages/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id)) {
-    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+    return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
   }
   const ok = await purgeMessage(c.env, id);
-  if (!ok) return c.json({ error: { code: "not_found", message: "Message introuvable" } }, 404);
+  if (!ok) return c.json({ error: { code: "not_found", message: "Message not found" } }, 404);
   return c.json({ ok: true });
 });
 
@@ -405,16 +407,16 @@ function contentDispositionFor(filename: string): string {
 api.get("/attachments/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id)) {
-    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+    return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
   }
 
   const att = await c.env.DB.prepare(
     "SELECT filename, mime_type, r2_key FROM attachments WHERE id = ?"
   ).bind(id).first<{ filename: string; mime_type: string; r2_key: string }>();
-  if (!att) return c.json({ error: { code: "not_found", message: "Pièce jointe introuvable" } }, 404);
+  if (!att) return c.json({ error: { code: "not_found", message: "Attachment not found" } }, 404);
 
   const obj = await c.env.MAIL.get(att.r2_key);
-  if (!obj) return c.json({ error: { code: "not_found", message: "Contenu introuvable" } }, 404);
+  if (!obj) return c.json({ error: { code: "not_found", message: "Attachment content not found" } }, 404);
 
   return new Response(obj.body, {
     headers: {
@@ -431,15 +433,15 @@ api.get("/attachments/:id", async (c) => {
 api.get("/messages/:id/raw", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id)) {
-    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+    return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
   }
 
   const msg = await c.env.DB.prepare("SELECT raw_key FROM messages WHERE id = ?")
     .bind(id).first<{ raw_key: string }>();
-  if (!msg) return c.json({ error: { code: "not_found", message: "Message introuvable" } }, 404);
+  if (!msg) return c.json({ error: { code: "not_found", message: "Message not found" } }, 404);
 
   const obj = await c.env.MAIL.get(msg.raw_key);
-  if (!obj) return c.json({ error: { code: "not_found", message: "MIME brut introuvable" } }, 404);
+  if (!obj) return c.json({ error: { code: "not_found", message: "Raw MIME not found" } }, 404);
 
   return new Response(obj.body, {
     headers: {
@@ -457,7 +459,7 @@ api.get("/forwarding/rules", async (c) => c.json(await listForwardRules(c.env.DB
 api.post("/forwarding/rules", async (c) => {
   const parsed = forwardRuleBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
+    return c.json({ error: { code: "invalid_body", ...validationError(parsed.error) } }, 400);
   }
 
   // La liste fermée côté interface est un confort, pas une garantie : on
@@ -471,7 +473,7 @@ api.post("/forwarding/rules", async (c) => {
     return c.json({
       error: {
         code: "unverified_destination",
-        message: `${destination} n'est pas une destination vérifiée sur votre compte Cloudflare`,
+        message: `${destination} is not a verified destination on your Cloudflare account`,
       },
     }, 400);
   }
@@ -479,7 +481,7 @@ api.post("/forwarding/rules", async (c) => {
   const rule = await createForwardRule(c.env.DB, parsed.data, Date.now());
   if (!rule) {
     return c.json({
-      error: { code: "duplicate_rule", message: "Cette redirection existe déjà" },
+      error: { code: "duplicate_rule", message: "Forwarding rule already exists" },
     }, 409);
   }
   return c.json(rule, 201);
@@ -488,15 +490,15 @@ api.post("/forwarding/rules", async (c) => {
 api.patch("/forwarding/rules/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id)) {
-    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+    return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
   }
   const parsed = forwardRulePatchBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
+    return c.json({ error: { code: "invalid_body", ...validationError(parsed.error) } }, 400);
   }
   const found = await setForwardRuleEnabled(c.env.DB, id, parsed.data.enabled);
   if (!found) {
-    return c.json({ error: { code: "not_found", message: "Redirection introuvable" } }, 404);
+    return c.json({ error: { code: "not_found", message: "Forwarding rule not found" } }, 404);
   }
   return c.json({ ok: true });
 });
@@ -504,11 +506,11 @@ api.patch("/forwarding/rules/:id", async (c) => {
 api.delete("/forwarding/rules/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id)) {
-    return c.json({ error: { code: "invalid_id", message: "Identifiant invalide" } }, 400);
+    return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
   }
   const found = await deleteForwardRule(c.env.DB, id);
   if (!found) {
-    return c.json({ error: { code: "not_found", message: "Redirection introuvable" } }, 404);
+    return c.json({ error: { code: "not_found", message: "Forwarding rule not found" } }, 404);
   }
   return c.json({ ok: true });
 });
@@ -524,7 +526,7 @@ api.get("/forwarding/destinations", async (c) => {
 api.get("/admin/orphans", async (c) => {
   const parsed = orphansQuery.safeParse(c.req.query());
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_query", message: formatValidationError(parsed.error) } }, 400);
+    return c.json({ error: { code: "invalid_query", ...validationError(parsed.error) } }, 400);
   }
   try {
     return c.json(await listOrphans(c.env, { cursor: parsed.data.cursor }));
@@ -536,7 +538,7 @@ api.get("/admin/orphans", async (c) => {
 api.get("/admin/parse-errors", async (c) => {
   const parsed = parseErrorsQuery.safeParse(c.req.query());
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_query", message: formatValidationError(parsed.error) } }, 400);
+    return c.json({ error: { code: "invalid_query", ...validationError(parsed.error) } }, 400);
   }
   const cursor = parsed.data.cursor === undefined ? undefined : Number(parsed.data.cursor);
   try {
@@ -551,7 +553,7 @@ api.get("/admin/parse-errors", async (c) => {
 api.post("/admin/reimport", async (c) => {
   const parsed = reimportBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
+    return c.json({ error: { code: "invalid_body", ...validationError(parsed.error) } }, 400);
   }
   const by = c.get("identity").email;
   const results = [];

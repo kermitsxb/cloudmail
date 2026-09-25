@@ -89,7 +89,7 @@ describe("verifyAccessJwt", () => {
 
   it("refuse un email non autorisé", async () => {
     await expect(verifyAccessJwt(testEnv(), await token({ email: "intrus@example.com" }))).rejects.toThrow(
-      /non autorisé/
+      /not allowed/
     );
   });
 

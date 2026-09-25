@@ -15,7 +15,7 @@ type AddressRow = { email: string; verified: string | null };
 export async function listVerifiedDestinations(env: Env): Promise<string[]> {
   if (!env.CF_ACCOUNT_ID || !env.CF_ROUTING_TOKEN) {
     throw new RoutingUnavailableError(
-      "CF_ACCOUNT_ID ou CF_ROUTING_TOKEN n'est pas configuré sur ce Worker"
+      "CF_ACCOUNT_ID or CF_ROUTING_TOKEN is not set on this Worker"
     );
   }
 
@@ -30,7 +30,7 @@ export async function listVerifiedDestinations(env: Env): Promise<string[]> {
       { headers: { Authorization: `Bearer ${env.CF_ROUTING_TOKEN}` } }
     );
   } catch {
-    throw new RoutingUnavailableError("API Cloudflare Email Routing : requête réseau échouée");
+    throw new RoutingUnavailableError("Cloudflare Email Routing API: network request failed");
   }
 
   const body = (await res.json().catch(() => null)) as
@@ -38,7 +38,7 @@ export async function listVerifiedDestinations(env: Env): Promise<string[]> {
     | null;
 
   if (!res.ok || !body?.success || !Array.isArray(body.result)) {
-    throw new RoutingUnavailableError(`API Cloudflare Email Routing : statut ${res.status}`);
+    throw new RoutingUnavailableError(`Cloudflare Email Routing API: status ${res.status}`);
   }
 
   // `verified` porte la date de confirmation, ou null tant que le lien reçu par
