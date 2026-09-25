@@ -43,7 +43,16 @@ export async function moveToFolder(
   const wasTrash = row.folder === "trash";
   const goingToTrash = folder === "trash";
 
-  const statements = [db.prepare("UPDATE messages SET folder = ? WHERE id = ?").bind(folder, messageId)];
+  // trashed_at date l'entrée en corbeille (point de départ de la purge planifiée) : il est
+  // remis à l'heure courante à chaque entrée et effacé à chaque sortie.
+  const statements = [
+    db.prepare(
+      `UPDATE messages
+          SET folder = ?1,
+              trashed_at = CASE WHEN ?1 = 'trash' THEN unixepoch() ELSE NULL END
+        WHERE id = ?2`
+    ).bind(folder, messageId),
+  ];
 
   // message_count et unread_count ne comptabilisent que les messages hors corbeille. Un
   // aller-retour inbox <-> sent (les deux hors corbeille) ne doit donc toucher aucun des deux

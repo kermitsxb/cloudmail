@@ -184,6 +184,33 @@ describe("purgeMessage", () => {
   });
 });
 
+describe("moveToFolder — trashed_at", () => {
+  const trashedAt = async (id: number) =>
+    (await env.DB.prepare("SELECT trashed_at FROM messages WHERE id = ?").bind(id)
+      .first<{ trashed_at: number | null }>())?.trashed_at;
+
+  it("date l'entrée en corbeille et l'efface à la sortie", async () => {
+    const before = Math.floor(Date.now() / 1000);
+    await moveToFolder(env.DB, 1, "trash");
+    expect(await trashedAt(1)).toBeGreaterThanOrEqual(before - 1);
+    await moveToFolder(env.DB, 1, "inbox");
+    expect(await trashedAt(1)).toBeNull();
+  });
+
+  it("redémarre le délai quand un message restauré retourne à la corbeille", async () => {
+    await moveToFolder(env.DB, 1, "trash");
+    await env.DB.prepare("UPDATE messages SET trashed_at = 1000 WHERE id = 1").run();
+    await moveToFolder(env.DB, 1, "inbox");
+    await moveToFolder(env.DB, 1, "trash");
+    expect(await trashedAt(1)).toBeGreaterThan(1000);
+  });
+
+  it("ne date rien lors d'un déplacement hors corbeille", async () => {
+    await moveToFolder(env.DB, 1, "sent");
+    expect(await trashedAt(1)).toBeNull();
+  });
+});
+
 describe("routes /api/messages/:id", () => {
   it("répond 401 sans jeton sur PATCH /api/messages/:id", async () => {
     const res = await app.request(
