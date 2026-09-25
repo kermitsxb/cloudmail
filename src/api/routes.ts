@@ -15,6 +15,7 @@ import {
 } from "../forwarding/rules";
 import { RoutingUnavailableError, listVerifiedDestinations } from "../forwarding/destinations";
 import { createIdentity, deleteIdentity, listIdentities, updateIdentity } from "../identities";
+import { RAW_KEY_PATTERN, listOrphans, listParseErrors, reimportKey } from "../admin/reimport";
 
 export type ApiEnv = { Bindings: Env; Variables: { identity: AccessIdentity } };
 
@@ -89,6 +90,23 @@ const identityPatchBody = z.object({
   message: "Fournir displayName ou isDefault",
 });
 
+// Un lot de réimport reste petit : chaque clé coûte plusieurs sous-requêtes R2 et D1, et
+// c'est le SPA qui enchaîne les lots pour une sélection plus grande.
+const REIMPORT_MAX_KEYS = 10;
+
+const orphansQuery = z.object({ cursor: z.string().min(1).max(1024).optional() });
+
+const parseErrorsQuery = z.object({
+  cursor: z.string().refine((v) => /^\d{1,15}$/.test(v), { message: "Curseur invalide" }).optional(),
+});
+
+const reimportBody = z.object({
+  keys: z.array(z.string()).min(1).max(REIMPORT_MAX_KEYS).refine(
+    (keys) => keys.every((k) => RAW_KEY_PATTERN.test(k)),
+    { message: "Clé invalide : seuls les bruts de messages reçus (raw/<sha256>.eml) sont réimportables" },
+  ),
+});
+
 // `ZodError.message` est un JSON.stringify des issues (en anglais) : impossible
 // à afficher tel quel à l'utilisateur, qui verrait un dump de la sérialisation
 // interne de zod plutôt qu'une phrase compréhensible. Ce helper construit à la
@@ -116,6 +134,22 @@ const routingUnavailableResponse = () =>
       message: "Impossible de lire les destinations vérifiées du compte Cloudflare",
     },
   }, { status: 503 });
+
+// Une panne R2 ou D1 pendant un listage d'administration : « je ne sais pas », pas une liste
+// vide qui ferait croire qu'il n'y a aucun orphelin. Le détail part dans les logs.
+const storageUnavailableResponse = (path: string, err: unknown) => {
+  console.error(JSON.stringify({
+    event: "admin_listing_failed",
+    path,
+    error: err instanceof Error ? err.message : String(err),
+  }));
+  return Response.json({
+    error: {
+      code: "storage_unavailable",
+      message: "Impossible de lire le stockage des messages. Réessayez dans un instant.",
+    },
+  }, { status: 503 });
+};
 
 // Récupère la liste des destinations vérifiées, ou la réponse 503 à renvoyer si
 // l'API Cloudflare est inaccessible. Toute autre exception continue de remonter
@@ -485,4 +519,42 @@ api.get("/forwarding/destinations", async (c) => {
   const destinations = await listVerifiedDestinationsOrResponse(c.env);
   if (destinations instanceof Response) return destinations;
   return c.json({ destinations });
+});
+
+api.get("/admin/orphans", async (c) => {
+  const parsed = orphansQuery.safeParse(c.req.query());
+  if (!parsed.success) {
+    return c.json({ error: { code: "invalid_query", message: formatValidationError(parsed.error) } }, 400);
+  }
+  try {
+    return c.json(await listOrphans(c.env, { cursor: parsed.data.cursor }));
+  } catch (err) {
+    return storageUnavailableResponse("/admin/orphans", err);
+  }
+});
+
+api.get("/admin/parse-errors", async (c) => {
+  const parsed = parseErrorsQuery.safeParse(c.req.query());
+  if (!parsed.success) {
+    return c.json({ error: { code: "invalid_query", message: formatValidationError(parsed.error) } }, 400);
+  }
+  const cursor = parsed.data.cursor === undefined ? undefined : Number(parsed.data.cursor);
+  try {
+    return c.json(await listParseErrors(c.env, { cursor }));
+  } catch (err) {
+    return storageUnavailableResponse("/admin/parse-errors", err);
+  }
+});
+
+// Réimporte des bruts un par un, dans l'ordre de la requête. 200 même si certaines clés
+// échouent : chaque clé porte son propre résultat (voir reimportKey).
+api.post("/admin/reimport", async (c) => {
+  const parsed = reimportBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: { code: "invalid_body", message: formatValidationError(parsed.error) } }, 400);
+  }
+  const by = c.get("identity").email;
+  const results = [];
+  for (const key of new Set(parsed.data.keys)) results.push(await reimportKey(c.env, key, by));
+  return c.json({ results });
 });
