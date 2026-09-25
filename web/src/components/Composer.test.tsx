@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer";
+import { LocaleSelect } from "./LocaleSelect";
+import { LocaleProvider } from "../i18n";
 import { renderWithI18n as render } from "../test/i18n";
 
 const wrap = (ui: React.ReactElement) => {
@@ -114,5 +116,48 @@ describe("Composer", () => {
     render(<QueryClientProvider client={qc}><Composer mode="new" onClose={() => {}} /></QueryClientProvider>, { locale: "en" });
     expect(await screen.findByLabelText("To")).toBeDefined();
     expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
+  });
+
+  it("retraduit une erreur déjà affichée après un changement de langue", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rtlRender(
+      <LocaleProvider initialLocale="fr">
+        <LocaleSelect />
+        <QueryClientProvider client={qc}>
+          <Composer mode="new" onClose={() => {}} />
+        </QueryClientProvider>
+      </LocaleProvider>,
+    );
+
+    await screen.findByLabelText("Destinataires");
+    await userEvent.click(screen.getByRole("button", { name: "Envoyer" }));
+    expect(await screen.findByText("Indique au moins un destinataire")).toBeDefined();
+
+    await userEvent.selectOptions(screen.getByLabelText("Langue"), "en");
+
+    expect(await screen.findByText("Enter at least one recipient")).toBeDefined();
+    expect(screen.queryByText("Indique au moins un destinataire")).toBeNull();
+  });
+
+  it("signale un échec de lecture de fichier sans laisser de rejet non géré", async () => {
+    class FailingFileReader {
+      onerror: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      error = new Error("boom");
+      readAsDataURL() {
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+    vi.stubGlobal("FileReader", FailingFileReader as unknown as typeof FileReader);
+
+    try {
+      wrap(<Composer mode="new" onClose={() => {}} />);
+      const input = (await screen.findByLabelText("Pièces jointes")) as HTMLInputElement;
+      const file = new File(["a"], "a.txt");
+      await userEvent.upload(input, file);
+      expect(await screen.findByText("Impossible de lire le fichier")).toBeDefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

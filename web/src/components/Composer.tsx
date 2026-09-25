@@ -4,6 +4,7 @@ import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { useIdentities, useSendMessage, type MessageDetail } from "../api/client";
 import { useI18n } from "../i18n";
+import type { Catalog } from "../i18n/fr";
 import { errorText } from "../lib/errors";
 
 // Calque exact de `payloadSize` côté Worker (src/send/client.ts) : mesure la taille du
@@ -51,9 +52,34 @@ function readFileAsBase64(file: File): Promise<string> {
       const result = reader.result as string;
       resolve(result.split(",")[1] ?? "");
     };
-    reader.onerror = () => reject(reader.error ?? new Error("Échec de lecture du fichier"));
+    reader.onerror = () => reject(reader.error ?? new Error("file read failed"));
     reader.readAsDataURL(file);
   });
+}
+
+// L'erreur elle-même est stockée non traduite, pour rester traduisible après un
+// changement de langue en cours de saisie (voir Composer.test.tsx).
+type ComposerError = { kind: "noRecipient" } | { kind: "tooLarge" } | { kind: "api"; err: unknown };
+type ComposerFileError = { kind: "tooLarge" } | { kind: "fileRead" };
+
+function composerErrorText(error: ComposerError, t: Catalog): string {
+  switch (error.kind) {
+    case "noRecipient":
+      return t.composer.noRecipient;
+    case "tooLarge":
+      return t.composer.messageTooLarge;
+    case "api":
+      return errorText(error.err, t);
+  }
+}
+
+function composerFileErrorText(error: ComposerFileError, t: Catalog): string {
+  switch (error.kind) {
+    case "tooLarge":
+      return t.composer.attachmentsTooLarge;
+    case "fileRead":
+      return t.composer.fileReadFailed;
+  }
 }
 
 export function Composer({
@@ -74,8 +100,8 @@ export function Composer({
   const [subject, setSubject] = useState(mode === "reply" && replyTo ? replySubject(replyTo.subject) : "");
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [error, setError] = useState<ComposerError | null>(null);
+  const [fileError, setFileError] = useState<ComposerFileError | null>(null);
   const [bounces, setBounces] = useState<string[] | null>(null);
 
   // Dérivé de `identities` à chaque rendu plutôt que copié dans un effect : évite un
@@ -89,13 +115,19 @@ export function Composer({
     e.target.value = "";
     if (files.length === 0) return;
 
-    const newAttachments = await Promise.all(
-      files.map(async (file) => ({
-        filename: file.name,
-        mimeType: file.type || "application/octet-stream",
-        contentBase64: await readFileAsBase64(file),
-      })),
-    );
+    let newAttachments: Attachment[];
+    try {
+      newAttachments = await Promise.all(
+        files.map(async (file) => ({
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          contentBase64: await readFileAsBase64(file),
+        })),
+      );
+    } catch {
+      setFileError({ kind: "fileRead" });
+      return;
+    }
 
     const merged = [...attachments, ...newAttachments];
     const size = payloadSize({
@@ -105,7 +137,7 @@ export function Composer({
       attachments: merged,
     });
     if (size > MAX_PAYLOAD_BYTES) {
-      setFileError(t.composer.attachmentsTooLarge);
+      setFileError({ kind: "tooLarge" });
       return;
     }
     setFileError(null);
@@ -122,13 +154,13 @@ export function Composer({
 
     const recipients = parseRecipients(to);
     if (recipients.length === 0) {
-      setError(t.composer.noRecipient);
+      setError({ kind: "noRecipient" });
       return;
     }
 
     const size = payloadSize({ subject, text, to: recipients, attachments });
     if (size > MAX_PAYLOAD_BYTES) {
-      setError(t.composer.messageTooLarge);
+      setError({ kind: "tooLarge" });
       return;
     }
 
@@ -150,7 +182,7 @@ export function Composer({
           onClose();
         },
         onError: (err) => {
-          setError(errorText(err, t));
+          setError({ kind: "api", err });
         },
       },
     );
@@ -160,9 +192,9 @@ export function Composer({
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       {(error || fileError) && (
         <div role="alert" className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
+          {error && composerErrorText(error, t)}
           {error && fileError && <br />}
-          {fileError}
+          {fileError && composerFileErrorText(fileError, t)}
         </div>
       )}
 
