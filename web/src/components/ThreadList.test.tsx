@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadList } from "./ThreadList";
 import type { ThreadSummary } from "../api/client";
+import { renderWithI18n as render } from "../test/i18n";
 
 const threads: ThreadSummary[] = [
   { id: 1, subject: "Facture", snippet: "Voici la facture", lastMessageAt: 1757318400,
@@ -39,6 +40,17 @@ describe("ThreadList", () => {
   it("affiche un état vide explicite", () => {
     render(<ThreadList threads={[]} selectedId={null} onSelect={() => {}} />);
     expect(screen.getByText(/Aucun message/)).toBeDefined();
+  });
+
+  it("s'affiche en anglais", () => {
+    render(<ThreadList threads={[]} selectedId={null} onSelect={() => {}} />, { locale: "en" });
+    expect(screen.getByText("Nothing here.")).toBeDefined();
+  });
+
+  it("formate les dates dans la langue active", () => {
+    // 1757318400 = 8 septembre 2025 : jamais « aujourd'hui », donc format jour + mois.
+    render(<ThreadList threads={threads.slice(0, 1)} selectedId={null} onSelect={() => {}} />, { locale: "en" });
+    expect(screen.getByText("Sep 8")).toBeDefined();
   });
 });
 

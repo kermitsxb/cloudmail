@@ -60,7 +60,8 @@ describe("POST /api/identities", () => {
   it("refuse une partie locale invalide", async () => {
     const res = await postIdentity({ localPart: "a b@c" });
     expect(res.status).toBe(400);
-    expect((await res.json() as { error: { code: string } }).error.code).toBe("invalid_body");
+    const body = (await res.json()) as { error: { code: string; reason?: string } };
+    expect(body.error).toMatchObject({ code: "invalid_body", reason: "invalid_local_part" });
   });
 
   it("refuse un doublon", async () => {

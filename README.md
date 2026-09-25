@@ -25,6 +25,8 @@ installation is configured with its own domain and its own sending identities.
   the addresses you allow can log in
 - **Nothing is ever lost** — every received message is archived in its raw
   form before anything else happens
+- Interface in English and French: it follows the browser language, and a
+  selector in the sidebar remembers another choice
 
 ## How it works
 
@@ -296,7 +298,6 @@ message's folder, read state and conversation, and never forwards it again.
 
 ## Roadmap
 
-- An English translation of the interface (it is currently French-only)
 - Scheduled maintenance: automatic emptying of the trash after a set number of
   days, and a periodic check that counts messages stored in R2 but missing from
   the app, so lost mail is detected without the manual procedure above

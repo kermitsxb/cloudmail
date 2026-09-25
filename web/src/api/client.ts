@@ -40,9 +40,16 @@ export type Identity = { address: string; displayName: string | null; isDefault:
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  // Contrat d'erreur de l'API : `code` stable, `reason` optionnelle qui précise
+  // une erreur de validation. L'interface traduit l'un ou l'autre ; `message`
+  // (en anglais) ne sert que de repli.
+  code?: string;
+  reason?: string;
+  constructor(message: string, status: number, code?: string, reason?: string) {
     super(message);
     this.status = status;
+    this.code = code;
+    this.reason = reason;
   }
 }
 
@@ -52,8 +59,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: { message: string } } | null;
-    throw new ApiError(body?.error?.message ?? `Erreur ${res.status}`, res.status);
+    const body = (await res.json().catch(() => null)) as
+      | { error?: { code?: string; message?: string; reason?: string } }
+      | null;
+    throw new ApiError(body?.error?.message ?? "", res.status, body?.error?.code, body?.error?.reason);
   }
   return res.json() as Promise<T>;
 }

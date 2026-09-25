@@ -33,7 +33,7 @@ function requireAccessConfig(env: Env): void {
   );
   if (manquants.length > 0) {
     throw new Error(
-      `configuration Access incomplète : ${manquants.join(", ")} non posé(s) sur le Worker`
+      `incomplete Access configuration: ${manquants.join(", ")} not set on the Worker`
     );
   }
 }
@@ -49,7 +49,7 @@ export async function verifyAccessJwt(env: Env, token: string): Promise<AccessId
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
   if (!email || !allowed.includes(email)) {
-    throw new Error(`email non autorisé : ${email || "(absent)"}`);
+    throw new Error(`email not allowed: ${email || "(missing)"}`);
   }
   return { email };
 }
@@ -78,13 +78,13 @@ export function requireAccess(): MiddlewareHandler<{
     }
     const token = c.req.header("Cf-Access-Jwt-Assertion") ?? tokenFromCookie(c.req.raw.headers.get("cookie"));
     if (!token) {
-      return c.json({ error: { code: "unauthenticated", message: "Jeton Access absent" } }, 401);
+      return c.json({ error: { code: "unauthenticated", message: "Access token missing" } }, 401);
     }
     try {
       c.set("identity", await verifyAccessJwt(c.env, token));
     } catch (err) {
       return c.json(
-        { error: { code: "unauthenticated", message: err instanceof Error ? err.message : "Jeton invalide" } },
+        { error: { code: "unauthenticated", message: err instanceof Error ? err.message : "Invalid token" } },
         401
       );
     }

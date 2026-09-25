@@ -7,29 +7,35 @@ import {
   type Orphan,
   type ReimportResult,
 } from "../api/client";
+import { useI18n } from "../i18n";
+import type { Catalog } from "../i18n/fr";
+import { errorText } from "../lib/errors";
 import { outcomeLabel } from "../lib/reimport";
 import { Button } from "./ui/button";
 
-const formatSize = (bytes: number) =>
-  bytes < 1024 ? `${bytes} o` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} Ko` : `${(bytes / 1024 / 1024).toFixed(1)} Mo`;
+const formatSize = (bytes: number, u: Catalog["maintenance"]["size"]) =>
+  bytes < 1024
+    ? `${bytes} ${u.bytes}`
+    : bytes < 1024 * 1024
+      ? `${Math.round(bytes / 1024)} ${u.kilobytes}`
+      : `${(bytes / 1024 / 1024).toFixed(1)} ${u.megabytes}`;
 
-const formatDate = (value: string | number) =>
-  new Date(typeof value === "number" ? value * 1000 : value).toLocaleString("fr-FR", {
-    day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-  });
-
-const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+};
+const toDate = (value: string | number) => new Date(typeof value === "number" ? value * 1000 : value);
 
 // Messages présents dans R2 mais absents de la base : l'analyse parcourt tout le bucket page
 // par page, et une page en échec peut être reprise sans perdre les orphelins déjà trouvés.
 function OrphansPanel() {
+  const { t, formatDate } = useI18n();
   const qc = useQueryClient();
   const [orphans, setOrphans] = useState<Orphan[]>([]);
   const [scanned, setScanned] = useState(false);
   const [scanning, setScanning] = useState(false);
   // Curseur de la page à redemander après un échec (null : repartir du début).
   const [resumeCursor, setResumeCursor] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [results, setResults] = useState<Map<string, ReimportResult>>(new Map());
   const [importing, setImporting] = useState(false);
@@ -53,7 +59,7 @@ function OrphansPanel() {
       } while (cursor !== null);
       setScanned(true);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(err);
     } finally {
       setScanning(false);
     }
@@ -82,7 +88,7 @@ function OrphansPanel() {
       );
       setSelected(new Set());
     } catch (err) {
-      setError(errorMessage(err));
+      setError(err);
     } finally {
       setImporting(false);
       qc.invalidateQueries({ queryKey: ["threads"] });
@@ -91,27 +97,25 @@ function OrphansPanel() {
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-base font-semibold">Messages orphelins</h2>
-      <p className="text-sm text-muted-foreground">
-        Messages conservés dans le stockage mais absents de la boîte, après un échec lors de leur réception.
-      </p>
+      <h2 className="text-base font-semibold">{t.maintenance.orphans.title}</h2>
+      <p className="text-sm text-muted-foreground">{t.maintenance.orphans.intro}</p>
       <div className="flex gap-2">
         <Button type="button" onClick={() => scan(null)} disabled={scanning || importing}>
-          {scanning ? "Analyse en cours…" : "Analyser le stockage"}
+          {scanning ? t.maintenance.orphans.scanning : t.maintenance.orphans.scan}
         </Button>
         {error !== null && !scanning && resumeCursor !== null && (
           <Button type="button" variant="outline" onClick={() => scan(resumeCursor)}>
-            Reprendre
+            {t.maintenance.orphans.resume}
           </Button>
         )}
       </div>
 
       {error !== null && (
-        <p role="alert" className="text-sm text-destructive">{error}</p>
+        <p role="alert" className="text-sm text-destructive">{errorText(error, t)}</p>
       )}
 
       {scanned && orphans.length === 0 && (
-        <p className="text-sm text-muted-foreground">Aucun message orphelin.</p>
+        <p className="text-sm text-muted-foreground">{t.maintenance.orphans.empty}</p>
       )}
 
       {orphans.length > 0 && (
@@ -120,14 +124,14 @@ function OrphansPanel() {
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                aria-label="Tout sélectionner"
+                aria-label={t.maintenance.orphans.selectAll}
                 checked={allSelected}
                 onChange={() => setSelected(allSelected ? new Set() : new Set(orphans.map((o) => o.key)))}
               />
-              Tout sélectionner
+              {t.maintenance.orphans.selectAll}
             </label>
             <Button type="button" onClick={reimportSelected} disabled={selected.size === 0 || importing || scanning}>
-              {importing ? "Réimport en cours…" : `Réimporter la sélection (${selected.size})`}
+              {importing ? t.maintenance.reimporting : t.maintenance.orphans.reimportSelection(selected.size)}
             </Button>
           </div>
           <ul className="flex flex-col">
@@ -137,19 +141,19 @@ function OrphansPanel() {
                 <li key={o.key} className="flex items-center gap-3 border-b border-border py-2 text-sm">
                   <input
                     type="checkbox"
-                    aria-label={`Sélectionner ${o.key}`}
+                    aria-label={t.maintenance.orphans.select(o.key)}
                     checked={selected.has(o.key)}
                     onChange={() => toggle(o.key)}
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-mono text-xs">{o.key}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatSize(o.size)} — reçu le {formatDate(o.uploaded)}
+                      {t.maintenance.orphans.meta(formatSize(o.size, t.maintenance.size), formatDate(toDate(o.uploaded), DATE_OPTIONS))}
                     </p>
                   </div>
                   {result && (
                     <span className={result.outcome === "error" || result.outcome === "not_found" ? "text-xs text-destructive" : "text-xs"}>
-                      {outcomeLabel(result)}
+                      {outcomeLabel(result, t)}
                     </span>
                   )}
                 </li>
@@ -164,11 +168,12 @@ function OrphansPanel() {
 
 // Messages que le parseur n'a pas compris : à réimporter après une correction du parseur.
 function ParseErrorsPanel() {
+  const { t, formatDate } = useI18n();
   const qc = useQueryClient();
   const { data, error, isLoading } = useParseErrors();
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<ReimportResult[] | null>(null);
-  const [runError, setRunError] = useState<string | null>(null);
+  const [runError, setRunError] = useState<unknown>(null);
 
   const run = async () => {
     if (!data) return;
@@ -181,7 +186,7 @@ function ParseErrorsPanel() {
         setResults([...collected]);
       });
     } catch (err) {
-      setRunError(errorMessage(err));
+      setRunError(err);
     } finally {
       setRunning(false);
       qc.invalidateQueries({ queryKey: ["parseErrors"] });
@@ -194,43 +199,41 @@ function ParseErrorsPanel() {
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-base font-semibold">Erreurs d'analyse</h2>
-      <p className="text-sm text-muted-foreground">
-        Messages reçus qui n'ont pas pu être analysés. Réimportez-les après une mise à jour de Cloudmail.
-      </p>
+      <h2 className="text-base font-semibold">{t.maintenance.parseErrors.title}</h2>
+      <p className="text-sm text-muted-foreground">{t.maintenance.parseErrors.intro}</p>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Chargement…</p>}
-      {error && <p role="alert" className="text-sm text-destructive">{error.message}</p>}
+      {isLoading && <p className="text-sm text-muted-foreground">{t.common.loading}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{errorText(error, t)}</p>}
       {data && data.length === 0 && results === null && (
-        <p className="text-sm text-muted-foreground">Aucun message en erreur d'analyse.</p>
+        <p className="text-sm text-muted-foreground">{t.maintenance.parseErrors.empty}</p>
       )}
 
       {data && data.length > 0 && (
         <>
           <div>
             <Button type="button" onClick={run} disabled={running}>
-              {running ? "Réimport en cours…" : `Tout réimporter (${data.length})`}
+              {running ? t.maintenance.reimporting : t.maintenance.parseErrors.reimportAll(data.length)}
             </Button>
           </div>
           <ul className="flex flex-col">
             {data.map((m) => (
               <li key={m.id} className="flex items-baseline justify-between gap-3 border-b border-border py-2 text-sm">
-                <span className="truncate">{m.subject || "(sans objet)"}</span>
-                <time className="shrink-0 text-xs text-muted-foreground">{formatDate(m.receivedAt)}</time>
+                <span className="truncate">{m.subject || t.common.noSubject}</span>
+                <time className="shrink-0 text-xs text-muted-foreground">{formatDate(toDate(m.receivedAt), DATE_OPTIONS)}</time>
               </li>
             ))}
           </ul>
         </>
       )}
 
-      {runError !== null && <p role="alert" className="text-sm text-destructive">{runError}</p>}
+      {runError !== null && <p role="alert" className="text-sm text-destructive">{errorText(runError, t)}</p>}
 
       {results !== null && (
         <div className="flex flex-col gap-1 text-sm">
-          <p>{`${succeeded} réanalysé(s), ${failures.length} échec(s)`}</p>
+          <p>{t.maintenance.parseErrors.summary(succeeded, failures.length)}</p>
           <ul className="flex flex-col gap-1 text-xs text-destructive">
             {failures.map((r) => (
-              <li key={r.key}>{`${r.key} — ${outcomeLabel(r)}`}</li>
+              <li key={r.key}>{`${r.key} — ${outcomeLabel(r, t)}`}</li>
             ))}
           </ul>
         </div>
@@ -240,9 +243,10 @@ function ParseErrorsPanel() {
 }
 
 export function MaintenanceSettings() {
+  const { t } = useI18n();
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8 p-6">
-      <h1 className="text-lg font-semibold">Maintenance</h1>
+      <h1 className="text-lg font-semibold">{t.maintenance.title}</h1>
       <OrphansPanel />
       <ParseErrorsPanel />
     </div>

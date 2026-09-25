@@ -3,6 +3,9 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { useIdentities, useSendMessage, type MessageDetail } from "../api/client";
+import { useI18n } from "../i18n";
+import type { Catalog } from "../i18n/fr";
+import { errorText } from "../lib/errors";
 
 // Calque exact de `payloadSize` côté Worker (src/send/client.ts) : mesure la taille du
 // message tel qu'il sera transmis (chaînes base64 telles quelles, pas les octets décodés)
@@ -49,9 +52,34 @@ function readFileAsBase64(file: File): Promise<string> {
       const result = reader.result as string;
       resolve(result.split(",")[1] ?? "");
     };
-    reader.onerror = () => reject(reader.error ?? new Error("Échec de lecture du fichier"));
+    reader.onerror = () => reject(reader.error ?? new Error("file read failed"));
     reader.readAsDataURL(file);
   });
+}
+
+// L'erreur elle-même est stockée non traduite, pour rester traduisible après un
+// changement de langue en cours de saisie (voir Composer.test.tsx).
+type ComposerError = { kind: "noRecipient" } | { kind: "tooLarge" } | { kind: "api"; err: unknown };
+type ComposerFileError = { kind: "tooLarge" } | { kind: "fileRead" };
+
+function composerErrorText(error: ComposerError, t: Catalog): string {
+  switch (error.kind) {
+    case "noRecipient":
+      return t.composer.noRecipient;
+    case "tooLarge":
+      return t.composer.messageTooLarge;
+    case "api":
+      return errorText(error.err, t);
+  }
+}
+
+function composerFileErrorText(error: ComposerFileError, t: Catalog): string {
+  switch (error.kind) {
+    case "tooLarge":
+      return t.composer.attachmentsTooLarge;
+    case "fileRead":
+      return t.composer.fileReadFailed;
+  }
 }
 
 export function Composer({
@@ -63,6 +91,7 @@ export function Composer({
   replyTo?: MessageDetail;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const { data: identities } = useIdentities();
   const sendMessage = useSendMessage();
 
@@ -71,8 +100,8 @@ export function Composer({
   const [subject, setSubject] = useState(mode === "reply" && replyTo ? replySubject(replyTo.subject) : "");
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [error, setError] = useState<ComposerError | null>(null);
+  const [fileError, setFileError] = useState<ComposerFileError | null>(null);
   const [bounces, setBounces] = useState<string[] | null>(null);
 
   // Dérivé de `identities` à chaque rendu plutôt que copié dans un effect : évite un
@@ -86,13 +115,19 @@ export function Composer({
     e.target.value = "";
     if (files.length === 0) return;
 
-    const newAttachments = await Promise.all(
-      files.map(async (file) => ({
-        filename: file.name,
-        mimeType: file.type || "application/octet-stream",
-        contentBase64: await readFileAsBase64(file),
-      })),
-    );
+    let newAttachments: Attachment[];
+    try {
+      newAttachments = await Promise.all(
+        files.map(async (file) => ({
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          contentBase64: await readFileAsBase64(file),
+        })),
+      );
+    } catch {
+      setFileError({ kind: "fileRead" });
+      return;
+    }
 
     const merged = [...attachments, ...newAttachments];
     const size = payloadSize({
@@ -102,7 +137,7 @@ export function Composer({
       attachments: merged,
     });
     if (size > MAX_PAYLOAD_BYTES) {
-      setFileError("L'ensemble dépasse la limite de 5 MiB");
+      setFileError({ kind: "tooLarge" });
       return;
     }
     setFileError(null);
@@ -119,13 +154,13 @@ export function Composer({
 
     const recipients = parseRecipients(to);
     if (recipients.length === 0) {
-      setError("Indique au moins un destinataire");
+      setError({ kind: "noRecipient" });
       return;
     }
 
     const size = payloadSize({ subject, text, to: recipients, attachments });
     if (size > MAX_PAYLOAD_BYTES) {
-      setError("Le message dépasse la limite de 5 MiB");
+      setError({ kind: "tooLarge" });
       return;
     }
 
@@ -147,7 +182,7 @@ export function Composer({
           onClose();
         },
         onError: (err) => {
-          setError(err.message);
+          setError({ kind: "api", err });
         },
       },
     );
@@ -157,28 +192,28 @@ export function Composer({
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       {(error || fileError) && (
         <div role="alert" className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
+          {error && composerErrorText(error, t)}
           {error && fileError && <br />}
-          {fileError}
+          {fileError && composerFileErrorText(fileError, t)}
         </div>
       )}
 
       {bounces && bounces.length > 0 && (
         <div role="alert" className="flex flex-col gap-2 rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <p>Rejets définitifs : {bounces.join(", ")}</p>
+          <p>{t.composer.bounces(bounces.join(", "))}</p>
           <Button type="button" size="sm" variant="outline" onClick={onClose}>
-            Fermer
+            {t.common.close}
           </Button>
         </div>
       )}
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-from" className="text-xs font-medium text-muted-foreground">
-          De
+          {t.composer.from}
         </label>
         <select
           id="composer-from"
-          aria-label="De"
+          aria-label={t.composer.from}
           value={from}
           onChange={(e) => setFromOverride(e.target.value)}
           className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none"
@@ -193,24 +228,24 @@ export function Composer({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-to" className="text-xs font-medium text-muted-foreground">
-          Destinataires
+          {t.composer.to}
         </label>
         <Input
           id="composer-to"
-          aria-label="Destinataires"
+          aria-label={t.composer.to}
           value={to}
           onChange={(e) => setTo(e.target.value)}
-          placeholder="zoe@example.com, bob@example.com"
+          placeholder={t.composer.toPlaceholder}
         />
       </div>
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-subject" className="text-xs font-medium text-muted-foreground">
-          Objet
+          {t.composer.subject}
         </label>
         <Input
           id="composer-subject"
-          aria-label="Objet"
+          aria-label={t.composer.subject}
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
         />
@@ -218,11 +253,11 @@ export function Composer({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-text" className="text-xs font-medium text-muted-foreground">
-          Message
+          {t.composer.message}
         </label>
         <Textarea
           id="composer-text"
-          aria-label="Message"
+          aria-label={t.composer.message}
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={8}
@@ -231,11 +266,11 @@ export function Composer({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-attachments" className="text-xs font-medium text-muted-foreground">
-          Pièces jointes
+          {t.composer.attachments}
         </label>
         <input
           id="composer-attachments"
-          aria-label="Pièces jointes"
+          aria-label={t.composer.attachments}
           type="file"
           multiple
           onChange={handleFileChange}
@@ -246,7 +281,7 @@ export function Composer({
             {attachments.map((a, i) => (
               <li key={`${a.filename}-${i}`} className="flex items-center gap-1 rounded border border-border px-2 py-1 text-xs">
                 {a.filename}
-                <button type="button" onClick={() => removeAttachment(i)} aria-label={`Retirer ${a.filename}`}>
+                <button type="button" onClick={() => removeAttachment(i)} aria-label={t.composer.removeAttachment(a.filename)}>
                   ×
                 </button>
               </li>
@@ -257,10 +292,10 @@ export function Composer({
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onClose}>
-          Annuler
+          {t.common.cancel}
         </Button>
         <Button type="submit" disabled={sendMessage.isPending}>
-          Envoyer
+          {t.composer.send}
         </Button>
       </div>
     </form>

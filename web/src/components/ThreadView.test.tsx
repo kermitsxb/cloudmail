@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadDetail } from "../api/client";
+import { renderWithI18n as render } from "../test/i18n";
 import { ThreadView } from "./ThreadView";
 
 const thread: ThreadDetail = {
@@ -48,12 +49,13 @@ const thread: ThreadDetail = {
   ],
 };
 
-function renderThreadView() {
+function renderThreadView({ locale }: { locale?: "fr" | "en" } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <ThreadView threadId={1} />
     </QueryClientProvider>,
+    { locale },
   );
 }
 
@@ -85,6 +87,9 @@ describe("ThreadView", () => {
       if (init?.method === "PATCH") {
         return Response.json({ ok: true });
       }
+      if (url === "/api/identities") {
+        return Response.json([]);
+      }
       return Response.json({});
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -105,6 +110,22 @@ describe("ThreadView", () => {
     const buttons = await screen.findAllByRole("button", { name: /Répondre/ });
     expect(buttons.length).toBe(1);
     expect(screen.getByText(/Bob/)).toBeDefined();
+  });
+
+  it("traduit le bouton de fermeture de la boîte de dialogue de réponse", async () => {
+    renderThreadView();
+    await screen.findByText("Facture de septembre");
+
+    await userEvent.click((await screen.findAllByRole("button", { name: /Répondre/ }))[0]);
+    expect(await screen.findByRole("button", { name: "Fermer" })).toBeDefined();
+  });
+
+  it("traduit le bouton de fermeture en anglais", async () => {
+    renderThreadView({ locale: "en" });
+    await screen.findByText("Facture de septembre");
+
+    await userEvent.click((await screen.findAllByRole("button", { name: /Reply/ }))[0]);
+    expect(await screen.findByRole("button", { name: "Close" })).toBeDefined();
   });
 
   it("marque les messages non lus comme lus avec une requête PATCH par message, sans boucle", async () => {
@@ -172,5 +193,12 @@ describe("ThreadView", () => {
 
     await screen.findByRole("button", { name: /Répondre/ });
     expect(screen.queryByRole("button", { name: "Réimporter" })).toBeNull();
+  });
+
+  it("s'affiche en anglais", async () => {
+    // Même fixture que « déplie le dernier message par défaut… ».
+    renderThreadView({ locale: "en" });
+    expect(await screen.findByRole("button", { name: "Reply" })).toBeDefined();
+    expect(screen.getByText(/^\d+ messages?$/)).toBeDefined();
   });
 });

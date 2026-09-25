@@ -1,17 +1,18 @@
 import type { ReimportResult } from "../api/client";
+import type { Catalog } from "../i18n/fr";
 
 // Libellé affiché pour le résultat du réimport d'une clé.
-export function outcomeLabel(result: ReimportResult): string {
+export function outcomeLabel(result: ReimportResult, t: Catalog): string {
   switch (result.outcome) {
     case "imported":
-      return "Importé";
+      return t.reimportOutcome.imported;
     case "reparsed":
-      return "Réanalysé";
+      return t.reimportOutcome.reparsed;
     case "duplicate":
-      return `Déjà présent (message #${result.messageIds[0]})`;
+      return t.reimportOutcome.duplicate(result.messageIds[0]);
     case "not_found":
-      return "Introuvable dans le stockage";
+      return t.reimportOutcome.notFound;
     case "error":
-      return `Échec : ${result.error}`;
+      return t.reimportOutcome.error(result.error);
   }
 }

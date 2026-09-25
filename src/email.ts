@@ -31,7 +31,7 @@ async function forwardWithTimeout(
       message.forward(destination),
       new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error(`Délai dépassé (${FORWARD_TIMEOUT_MS} ms) : la redirection n'a pas abouti`)),
+          () => reject(new Error(`Timed out after ${FORWARD_TIMEOUT_MS} ms: forwarding did not complete`)),
           FORWARD_TIMEOUT_MS,
         );
       }),

@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithI18n as render } from "../test/i18n";
 import { ForwardingSettings } from "./ForwardingSettings";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -174,7 +175,11 @@ describe("ForwardingSettings", () => {
     stubApi({ rulesStatus: 500 });
     render(<ForwardingSettings />, { wrapper });
 
-    expect(await screen.findByText(/Impossible de lire les redirections/)).toBeDefined();
+    // Pas de point double entre le détail et la phrase suivante : readFailed
+    // ne doit plus ajouter son propre "." final (celui-ci se lit "rules Si...").
+    expect(
+      await screen.findByText(/Impossible de lire les redirections : no such table: forward_rules Si/),
+    ).toBeDefined();
     // Un 500 ne doit surtout pas se lire comme « vous n'avez aucune redirection ».
     expect(screen.queryByText("Aucune redirection.")).toBeNull();
   });
@@ -228,5 +233,11 @@ describe("ForwardingSettings", () => {
     expect(await screen.findByText(/domaine de messagerie/i)).toBeDefined();
     expect(screen.queryByText(/contact@$/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Ajouter une redirection" })).toBeNull();
+  });
+
+  it("s'affiche en anglais", async () => {
+    stubApi({ rules: [rule()] });
+    render(<ForwardingSettings />, { wrapper, locale: "en" });
+    expect(await screen.findByRole("switch", { name: /^Disable forwarding for / })).toBeDefined();
   });
 });

@@ -49,7 +49,7 @@ export function payloadSize(req: SendRequest): number {
 
 export async function sendEmail(env: Env, req: SendRequest): Promise<SendResult> {
   if (payloadSize(req) > MAX_PAYLOAD_BYTES) {
-    throw new SendError("Le message dépasse la limite de 5 MiB", 413);
+    throw new SendError("Message exceeds the 5 MiB limit", 413);
   }
 
   const headers: Record<string, string> = {};
@@ -94,7 +94,7 @@ export async function sendEmail(env: Env, req: SendRequest): Promise<SendResult>
   // ne peut pas exposer CF_API_TOKEN.
   if (!res.ok || payload?.success === false) {
     const message = payload?.errors?.map((e) => e.message).join(" ; ")
-      ?? `L'API Email Sending a répondu ${res.status}`;
+      ?? `Email Sending API responded ${res.status}`;
     throw new SendError(message, res.status);
   }
 

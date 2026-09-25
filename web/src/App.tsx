@@ -7,10 +7,12 @@ import { MaintenanceSettings } from "./components/MaintenanceSettings";
 import { Sidebar } from "./components/Sidebar";
 import { ThreadList } from "./components/ThreadList";
 import { ThreadView } from "./components/ThreadView";
+import { useI18n } from "./i18n";
 
 const queryClient = new QueryClient();
 
 function Mailbox() {
+  const { t } = useI18n();
   const [folder, setFolder] = useState("inbox");
   const [query, setQuery] = useState("");
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
@@ -47,16 +49,16 @@ function Mailbox() {
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Rechercher…"
-                aria-label="Rechercher dans les conversations"
+                placeholder={t.app.searchPlaceholder}
+                aria-label={t.app.searchLabel}
                 className="w-full rounded border border-border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground"
               />
               <button
                 type="button"
                 onClick={() => refetch()}
                 disabled={isRefetching}
-                aria-label="Rafraîchir la liste des conversations"
-                title="Rafraîchir"
+                aria-label={t.app.refreshLabel}
+                title={t.app.refreshTitle}
                 className="shrink-0 rounded border border-border p-2 text-sm hover:bg-accent disabled:opacity-50"
               >
                 <span aria-hidden="true" className={isRefetching ? "inline-block animate-spin" : "inline-block"}>
@@ -82,7 +84,7 @@ function Mailbox() {
             className={`min-w-0 flex-col ${selectedThreadId === null ? "hidden lg:flex" : "flex"}`}
           >
             {selectedThreadId === null ? (
-              <p className="m-auto text-sm text-muted-foreground">Sélectionnez une conversation.</p>
+              <p className="m-auto text-sm text-muted-foreground">{t.app.selectConversation}</p>
             ) : (
               <ThreadView threadId={selectedThreadId} />
             )}

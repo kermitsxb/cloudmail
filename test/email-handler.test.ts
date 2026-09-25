@@ -184,7 +184,7 @@ describe("handleEmail — redirections", () => {
       "SELECT last_status, last_error FROM forward_rules LIMIT 1"
     ).first<{ last_status: string; last_error: string }>();
     expect(rule?.last_status).toBe("error");
-    expect(rule?.last_error).toMatch(/délai dépassé/i);
+    expect(rule?.last_error).toMatch(/timed out/i);
   });
 
   it("forwarde avant de consommer message.raw", async () => {

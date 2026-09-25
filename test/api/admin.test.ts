@@ -82,7 +82,7 @@ describe("GET /api/admin/parse-errors", () => {
   it("refuse un curseur non numérique", async () => {
     const res = await req("/api/admin/parse-errors?cursor=abc");
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ error: { code: "invalid_query", message: "Curseur invalide" } });
+    expect(await res.json()).toMatchObject({ error: { code: "invalid_query", message: "Invalid cursor" } });
   });
 
   it("renvoie une liste vide quand aucun message n'est en erreur", async () => {

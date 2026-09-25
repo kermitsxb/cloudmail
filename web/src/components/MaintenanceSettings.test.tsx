@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithI18n as render } from "../test/i18n";
 import { MaintenanceSettings } from "./MaintenanceSettings";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -142,5 +143,14 @@ describe("MaintenanceSettings — erreurs d'analyse", () => {
     stubApi({});
     render(<MaintenanceSettings />, { wrapper });
     expect(await screen.findByText("Aucun message en erreur d'analyse.")).toBeDefined();
+  });
+});
+
+describe("MaintenanceSettings — anglais", () => {
+  it("s'affiche en anglais", async () => {
+    stubApi({});
+    render(<MaintenanceSettings />, { wrapper, locale: "en" });
+    await userEvent.click(screen.getByRole("button", { name: "Scan storage" }));
+    expect(await screen.findByText("No orphaned messages.")).toBeDefined();
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
+import { useI18n } from "../i18n";
 
 // Panneau de rédaction ancré en bas de l'écran, façon Gmail : contrairement au `Dialog`
 // modal utilisé ailleurs dans l'app, il n'affiche pas de fond assombri et ne piège pas le
@@ -14,6 +15,7 @@ export function ComposerPanel({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const { t } = useI18n();
   const [minimized, setMinimized] = useState(false);
 
   useEffect(() => {
@@ -44,7 +46,7 @@ export function ComposerPanel({
               e.stopPropagation();
               setMinimized((m) => !m);
             }}
-            aria-label={minimized ? "Agrandir" : "Réduire"}
+            aria-label={minimized ? t.composerPanel.expand : t.composerPanel.minimize}
           >
             {minimized ? <ChevronUpIcon /> : <ChevronDownIcon />}
           </Button>
@@ -56,7 +58,7 @@ export function ComposerPanel({
               e.stopPropagation();
               onClose();
             }}
-            aria-label="Fermer"
+            aria-label={t.common.close}
           >
             <XIcon />
           </Button>
