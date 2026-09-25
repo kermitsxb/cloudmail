@@ -1,6 +1,6 @@
 import { env, applyD1Migrations } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { MAX_BODY_BYTES, storeIncoming } from "../../src/ingest/store";
+import { MAX_BODY_BYTES, storeIncoming, attachmentKey } from "../../src/ingest/store";
 
 interface TestEnv {
   TEST_FIXTURES: Record<string, string>;
@@ -187,5 +187,15 @@ describe("storeIncoming — redélivraison concurrente", () => {
     expect(messages?.n).toBe(1);
     const threads = await env.DB.prepare("SELECT COUNT(*) AS n FROM threads").first<{ n: number }>();
     expect(threads?.n).toBe(1);
+  });
+});
+
+describe("attachmentKey", () => {
+  it("range la pièce jointe sous l'identifiant nettoyé du message", () => {
+    expect(attachmentKey("<att-1@example.com>", 0, "data.csv")).toBe("att/att-1-example.com/0-data.csv");
+  });
+
+  it("nettoie le nom de fichier", () => {
+    expect(attachmentKey("<a@example.com>", 2, "rapport final (v2).pdf")).toBe("att/a-example.com/2-rapport-final-v2-.pdf");
   });
 });

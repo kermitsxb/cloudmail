@@ -19,8 +19,8 @@ export function Sidebar({
 }: {
   folder: string;
   onSelectFolder: (folder: string) => void;
-  view: "mail" | "forwarding" | "identities";
-  onSelectView: (view: "mail" | "forwarding" | "identities") => void;
+  view: "mail" | "forwarding" | "identities" | "maintenance";
+  onSelectView: (view: "mail" | "forwarding" | "identities" | "maintenance") => void;
 }) {
   const { data: identities } = useIdentities();
   const [composerOpen, setComposerOpen] = useState(false);
@@ -76,6 +76,16 @@ export function Sidebar({
             className="w-full rounded px-3 py-2 text-left text-sm hover:bg-accent aria-[current=true]:bg-accent aria-[current=true]:font-semibold"
           >
             Redirections
+          </button>
+        </li>
+        <li>
+          <button
+            type="button"
+            aria-current={view === "maintenance" ? "true" : undefined}
+            onClick={() => onSelectView("maintenance")}
+            className="w-full rounded px-3 py-2 text-left text-sm hover:bg-accent aria-[current=true]:bg-accent aria-[current=true]:font-semibold"
+          >
+            Maintenance
           </button>
         </li>
       </ul>

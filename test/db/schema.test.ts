@@ -70,4 +70,11 @@ describe("schéma", () => {
     ).bind(id).first<{ n: number }>();
     expect(left?.n).toBe(0);
   });
+
+  it("indexe messages.raw_key pour retrouver une ligne par son brut", async () => {
+    const row = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_raw_key'"
+    ).first<{ name: string }>();
+    expect(row?.name).toBe("idx_messages_raw_key");
+  });
 });

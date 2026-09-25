@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useThreads } from "./api/client";
 import { ForwardingSettings } from "./components/ForwardingSettings";
 import { IdentitiesSettings } from "./components/IdentitiesSettings";
+import { MaintenanceSettings } from "./components/MaintenanceSettings";
 import { Sidebar } from "./components/Sidebar";
 import { ThreadList } from "./components/ThreadList";
 import { ThreadView } from "./components/ThreadView";
@@ -13,7 +14,7 @@ function Mailbox() {
   const [folder, setFolder] = useState("inbox");
   const [query, setQuery] = useState("");
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
-  const [view, setView] = useState<"mail" | "forwarding" | "identities">("mail");
+  const [view, setView] = useState<"mail" | "forwarding" | "identities" | "maintenance">("mail");
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, refetch, isRefetching } = useThreads(folder, query);
   const threads = data?.pages.flatMap((p) => p.threads) ?? [];
@@ -28,9 +29,15 @@ function Mailbox() {
       <div className={selectedThreadId !== null ? "hidden lg:block" : "block"}>
         <Sidebar folder={folder} onSelectFolder={handleSelectFolder} view={view} onSelectView={setView} />
       </div>
-      {view === "forwarding" || view === "identities" ? (
+      {view !== "mail" ? (
         <div className="col-span-1 overflow-y-auto lg:col-span-2">
-          {view === "forwarding" ? <ForwardingSettings /> : <IdentitiesSettings />}
+          {view === "forwarding" ? (
+            <ForwardingSettings />
+          ) : view === "identities" ? (
+            <IdentitiesSettings />
+          ) : (
+            <MaintenanceSettings />
+          )}
         </div>
       ) : (
         <>

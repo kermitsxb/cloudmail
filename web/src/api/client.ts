@@ -29,6 +29,8 @@ export type MessageDetail = {
   isRead: boolean;
   parseError: boolean;
   bodyTruncated: boolean;
+  // Clé du brut dans R2 : sert au réimport d'un message reçu.
+  rawKey: string;
   attachments: { id: number; filename: string; mimeType: string; size: number }[];
 };
 
@@ -224,5 +226,72 @@ export const useDeleteForwardRule = () => {
     mutationFn: (id: number) =>
       api<{ ok: true }>(`/forwarding/rules/${id}`, { method: "DELETE" }),
     onSettled: () => qc.invalidateQueries({ queryKey: ["forwardRules"] }),
+  });
+};
+
+// Miroirs volontaires de src/admin/reimport.ts, comme les types ci-dessus.
+export type Orphan = { key: string; size: number; uploaded: string };
+export type OrphansPage = { orphans: Orphan[]; cursor: string | null };
+export type ParseErrorMessage = { id: number; rawKey: string; subject: string | null; receivedAt: number };
+type ParseErrorsPage = { messages: ParseErrorMessage[]; cursor: string | null };
+export type ReimportResult =
+  | { key: string; outcome: "imported"; messageIds: number[] }
+  | { key: string; outcome: "reparsed"; messageIds: number[] }
+  | { key: string; outcome: "duplicate"; messageIds: number[] }
+  | { key: string; outcome: "not_found" }
+  | { key: string; outcome: "error"; error: string };
+
+// Taille maximale d'un lot accepté par POST /api/admin/reimport.
+export const REIMPORT_BATCH_SIZE = 10;
+
+const withCursor = (path: string, cursor: string | null) =>
+  cursor === null ? path : `${path}?cursor=${encodeURIComponent(cursor)}`;
+
+export const fetchOrphans = (cursor: string | null) =>
+  api<OrphansPage>(withCursor("/admin/orphans", cursor));
+
+export const reimportKeys = (keys: string[]) =>
+  api<{ results: ReimportResult[] }>("/admin/reimport", {
+    method: "POST",
+    body: JSON.stringify({ keys }),
+  }).then((r) => r.results);
+
+// Enchaîne les lots séquentiellement et remonte chaque lot dès sa réponse : si un lot
+// échoue, les résultats des lots précédents sont déjà affichés.
+export async function reimportInBatches(
+  keys: string[],
+  onBatch: (results: ReimportResult[]) => void,
+): Promise<void> {
+  for (let i = 0; i < keys.length; i += REIMPORT_BATCH_SIZE) {
+    onBatch(await reimportKeys(keys.slice(i, i + REIMPORT_BATCH_SIZE)));
+  }
+}
+
+// Toutes les pages d'un coup : la liste sert à « Tout réimporter », qui a besoin de toutes
+// les clés, et le nombre de messages en erreur d'analyse reste faible.
+export const useParseErrors = () =>
+  useQuery({
+    queryKey: ["parseErrors"],
+    queryFn: async () => {
+      const all: ParseErrorMessage[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: ParseErrorsPage = await api<ParseErrorsPage>(withCursor("/admin/parse-errors", cursor));
+        all.push(...page.messages);
+        cursor = page.cursor;
+      } while (cursor !== null);
+      return all;
+    },
+  });
+
+export const useReimportMessage = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rawKey: string) => reimportKeys([rawKey]).then((r) => r[0]),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["threads"] });
+      qc.invalidateQueries({ queryKey: ["thread"] });
+      qc.invalidateQueries({ queryKey: ["parseErrors"] });
+    },
   });
 };

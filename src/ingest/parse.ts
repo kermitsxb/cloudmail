@@ -10,6 +10,8 @@ export type ParsedAttachment = {
 };
 export type ParsedMessage = {
   messageId: string; // avec chevrons ; UUID synthétique si absent
+  messageIdSynthetic: boolean; // Vrai quand messageId a été inventé par Cloudmail (message illisible ou sans en-tête Message-ID). Un nouveau parsing en inventerait un autre : le réimport s'en sert pour conserver l'identifiant déjà en base plutôt que de le remplacer.
+  dateSynthetic: boolean; // Vrai quand date a été inventée par Cloudmail (message illisible ou en-tête Date absent/invalide). Un nouveau parsing inventerait un autre instant (l'heure courante) : le réimport s'en sert pour conserver la date déjà en base plutôt que de la remplacer.
   inReplyTo: string | null;
   references: string[];
   from: ParsedAddress;
@@ -54,6 +56,8 @@ const toAddresses = (list: Address[] | undefined): ParsedAddress[] =>
 export async function parseEmail(raw: ArrayBuffer, envelopeFrom: string): Promise<ParsedMessage> {
   const fallback = (): ParsedMessage => ({
     messageId: `<${crypto.randomUUID()}@cloudmail.local>`,
+    messageIdSynthetic: true,
+    dateSynthetic: true,
     inReplyTo: null,
     references: [],
     from: { address: envelopeFrom.toLowerCase(), name: null },
@@ -84,6 +88,8 @@ export async function parseEmail(raw: ArrayBuffer, envelopeFrom: string): Promis
 
   return {
     messageId: email.messageId ?? `<${crypto.randomUUID()}@cloudmail.local>`,
+    messageIdSynthetic: !email.messageId,
+    dateSynthetic: !Number.isFinite(date),
     inReplyTo: email.inReplyTo ?? null,
     references: (email.references ?? "").split(/\s+/).filter((r) => r.startsWith("<")),
     from: email.from?.address

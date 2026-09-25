@@ -144,6 +144,15 @@ describe("getThread", () => {
     expect(t?.messages[0].attachments).toEqual([{ id: 1, filename: "f.pdf", mimeType: "application/pdf", size: 42 }]);
   });
 
+  it("expose la clé du brut de chaque message", async () => {
+    await insertThread(1, "facture", 100);
+    await insertMessage(1, 1, { subject: "Facture" });
+
+    const t = await getThread(env.DB, 1);
+    expect(t!.messages[0].rawKey).toEqual(expect.any(String));
+    expect(t!.messages[0].rawKey.length).toBeGreaterThan(0);
+  });
+
   // Régression : la requête des destinataires et celle des pièces jointes énuméraient un
   // paramètre lié par message, deux fois. D1 plafonne à 100 paramètres liés par requête, donc
   // au-delà de 100 messages dans un fil, GET /api/threads/:id échouait définitivement — le fil

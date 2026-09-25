@@ -115,7 +115,9 @@ pnpm run migrate:remote
 
 **When upgrading an existing installation, run this again before deploying.**
 It's harmless when there's nothing new, and a missing migration fails
-silently (for example, forwarding just stops working).
+silently (for example, forwarding just stops working). This release adds
+`migrations/0003_raw_key_index.sql`, so `pnpm run migrate:remote` must run
+before `pnpm run deploy`.
 
 ### 3. Add your sending identity
 
@@ -240,9 +242,15 @@ that has already been applied is never replayed, even if you edit it.
 ### Checking that no mail was lost
 
 Every incoming message is saved to R2 before anything else. If a later step
-fails, the message is still in R2 but won't show up in the app. To find such
-messages, compare the keys known to the database with the objects in the
-bucket:
+fails, the message is still in R2 but won't show up in the app.
+
+Open **Maintenance** in the sidebar and click **Analyser le stockage**: it
+lists every message stored in R2 but missing from the app, and lets you
+re-import them. The manual procedure below does the same from a terminal and
+stays useful if the Worker itself can't run.
+
+To find such messages by hand, compare the keys known to the database with
+the objects in the bucket:
 
 ```bash
 # 1. Keys known to D1
@@ -280,16 +288,14 @@ dashboard's object browser is enough.
 
 ### Re-importing a message
 
-`src/email.ts` exports a `reparse()` function that re-imports a stored message
-— useful after a parsing fix, or to recover a message found above. It doesn't
-forward the message again. There's no button or route for it yet: you need to
-add a temporary route and run it against your remote data with
-`pnpm wrangler dev --remote`. Remove that route afterwards and never deploy
-it.
+Any received message can be re-imported from its original copy in R2 —
+useful after an update that fixes how some messages are parsed. Use
+**Réimporter** on the message, or **Maintenance → Erreurs d'analyse → Tout
+réimporter** for every message that failed to parse. Re-importing keeps the
+message's folder, read state and conversation, and never forwards it again.
 
 ## Roadmap
 
-- An admin entry point for re-importing messages, instead of a temporary route
 - An English translation of the interface (it is currently French-only)
 - Scheduled maintenance: automatic emptying of the trash after a set number of
   days, and a periodic check that counts messages stored in R2 but missing from

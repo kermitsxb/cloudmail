@@ -9,6 +9,7 @@ export type MessageDetail = {
   cc: { address: string; name: string | null }[];
   subject: string; text: string; html: string | null;
   receivedAt: number; isRead: boolean; parseError: boolean; bodyTruncated: boolean;
+  rawKey: string;
   attachments: { id: number; filename: string; mimeType: string; size: number }[];
 };
 export type ThreadDetail = { id: number; subject: string; messages: MessageDetail[] };
@@ -99,13 +100,14 @@ export async function listThreads(
 export async function getThread(db: D1Database, id: number): Promise<ThreadDetail | null> {
   const messages = await db.prepare(
     `SELECT id, message_id, direction, folder, from_addr, from_name, subject, text_body, html_body,
-            received_at, is_read, parse_error, body_truncated
+            received_at, is_read, parse_error, body_truncated, raw_key
      FROM messages WHERE thread_id = ? ORDER BY received_at ASC`
   ).bind(id).all<{
     id: number; message_id: string; direction: "in" | "out"; folder: string;
     from_addr: string; from_name: string | null; subject: string | null;
     text_body: string | null; html_body: string | null;
     received_at: number; is_read: number; parse_error: number; body_truncated: number;
+    raw_key: string;
   }>();
   if (messages.results.length === 0) return null;
 
@@ -145,6 +147,7 @@ export async function getThread(db: D1Database, id: number): Promise<ThreadDetai
       isRead: Boolean(m.is_read),
       parseError: Boolean(m.parse_error),
       bodyTruncated: Boolean(m.body_truncated),
+      rawKey: m.raw_key,
       attachments: attachments.results.filter((a) => a.message_id === m.id)
         .map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mime_type, size: a.size })),
     })),

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadDetail } from "../api/client";
 import { ThreadView } from "./ThreadView";
@@ -23,6 +24,7 @@ const thread: ThreadDetail = {
       isRead: false,
       parseError: false,
       bodyTruncated: false,
+      rawKey: "raw/a.eml",
       attachments: [],
     },
     {
@@ -40,6 +42,7 @@ const thread: ThreadDetail = {
       isRead: false,
       parseError: false,
       bodyTruncated: false,
+      rawKey: "raw/b.eml",
       attachments: [{ id: 99, filename: "facture.pdf", mimeType: "application/pdf", size: 1234 }],
     },
   ],
@@ -74,6 +77,10 @@ describe("ThreadView", () => {
       }
       if (url.startsWith("/api/messages/") && url.endsWith("/body")) {
         return Response.json({ html: null, text: "corps du message", hasRemoteImages: false });
+      }
+      if (url === "/api/admin/reimport") {
+        const { keys } = JSON.parse(String(init!.body)) as { keys: string[] };
+        return Response.json({ results: keys.map((key) => ({ key, outcome: "reparsed", messageIds: [11] })) });
       }
       if (init?.method === "PATCH") {
         return Response.json({ ok: true });
@@ -120,5 +127,50 @@ describe("ThreadView", () => {
     renderThreadView();
     const link = await screen.findByRole("link", { name: /facture.pdf/ });
     expect(link.getAttribute("href")).toBe("/api/attachments/99");
+  });
+
+  it("réimporte un message reçu et recharge la conversation", async () => {
+    renderThreadView();
+    const button = await screen.findByRole("button", { name: "Réimporter" });
+    const threadFetchesBefore = fetchMock.mock.calls.filter(([url]) => url === "/api/threads/1").length;
+
+    await userEvent.click(button);
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([url]) => url === "/api/admin/reimport");
+      expect(JSON.parse(String((post![1] as RequestInit).body))).toEqual({ keys: ["raw/b.eml"] });
+    });
+    await waitFor(() => {
+      const after = fetchMock.mock.calls.filter(([url]) => url === "/api/threads/1").length;
+      expect(after).toBeGreaterThan(threadFetchesBefore);
+    });
+  });
+
+  it("affiche le résultat quand le réimport n'aboutit pas", async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/threads/1") return Response.json(thread);
+      if (url === "/api/admin/reimport") {
+        return Response.json({ results: [{ key: "raw/b.eml", outcome: "not_found" }] });
+      }
+      if (url.endsWith("/body")) return Response.json({ html: null, text: "corps", hasRemoteImages: false });
+      if (init?.method === "PATCH") return Response.json({ ok: true });
+      return Response.json({});
+    });
+    renderThreadView();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Réimporter" }));
+
+    expect(await screen.findByText("Introuvable dans le stockage")).toBeDefined();
+  });
+
+  it("ne propose pas le réimport pour un message envoyé", async () => {
+    const sent = { ...thread, messages: [{ ...thread.messages[1], direction: "out" as const, rawKey: "sent/<b@example.com>" }] };
+    fetchMock.mockImplementation(async (url: string) =>
+      url === "/api/threads/1" ? Response.json(sent) : Response.json({ html: null, text: "corps", hasRemoteImages: false }),
+    );
+    renderThreadView();
+
+    await screen.findByRole("button", { name: /Répondre/ });
+    expect(screen.queryByRole("button", { name: "Réimporter" })).toBeNull();
   });
 });
