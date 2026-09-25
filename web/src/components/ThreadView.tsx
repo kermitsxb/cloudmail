@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useThread, useUpdateMessage, type MessageDetail } from "../api/client";
+import { useReimportMessage, useThread, useUpdateMessage, type MessageDetail } from "../api/client";
+import { outcomeLabel } from "../lib/reimport";
 import { Composer } from "./Composer";
 import { MessageBody } from "./MessageBody";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -42,6 +43,7 @@ function MessageItem({
   onReply: () => void;
 }) {
   const updateMessage = useUpdateMessage();
+  const reimport = useReimportMessage();
 
   return (
     <li className="border-b border-border">
@@ -114,7 +116,28 @@ function MessageItem({
             >
               Supprimer
             </button>
+            {/* Un message envoyé n'a pas de brut dans R2 (clé sent/…) : rien à réimporter. */}
+            {message.direction === "in" && (
+              <button
+                type="button"
+                className="rounded border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
+                disabled={reimport.isPending}
+                onClick={() => reimport.mutate(message.rawKey)}
+              >
+                {reimport.isPending ? "Réimport…" : "Réimporter"}
+              </button>
+            )}
           </div>
+          {reimport.isError && (
+            <p role="alert" className="px-4 pb-2 text-xs text-destructive">
+              Réimport impossible : {reimport.error.message}
+            </p>
+          )}
+          {reimport.data && reimport.data.outcome !== "reparsed" && reimport.data.outcome !== "imported" && (
+            <p role="status" className="px-4 pb-2 text-xs text-destructive">
+              {outcomeLabel(reimport.data)}
+            </p>
+          )}
         </div>
       )}
     </li>
