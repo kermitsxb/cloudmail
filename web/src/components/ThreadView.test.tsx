@@ -87,6 +87,9 @@ describe("ThreadView", () => {
       if (init?.method === "PATCH") {
         return Response.json({ ok: true });
       }
+      if (url === "/api/identities") {
+        return Response.json([]);
+      }
       return Response.json({});
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -107,6 +110,22 @@ describe("ThreadView", () => {
     const buttons = await screen.findAllByRole("button", { name: /Répondre/ });
     expect(buttons.length).toBe(1);
     expect(screen.getByText(/Bob/)).toBeDefined();
+  });
+
+  it("traduit le bouton de fermeture de la boîte de dialogue de réponse", async () => {
+    renderThreadView();
+    await screen.findByText("Facture de septembre");
+
+    await userEvent.click((await screen.findAllByRole("button", { name: /Répondre/ }))[0]);
+    expect(await screen.findByRole("button", { name: "Fermer" })).toBeDefined();
+  });
+
+  it("traduit le bouton de fermeture en anglais", async () => {
+    renderThreadView({ locale: "en" });
+    await screen.findByText("Facture de septembre");
+
+    await userEvent.click((await screen.findAllByRole("button", { name: /Reply/ }))[0]);
+    expect(await screen.findByRole("button", { name: "Close" })).toBeDefined();
   });
 
   it("marque les messages non lus comme lus avec une requête PATCH par message, sans boucle", async () => {
