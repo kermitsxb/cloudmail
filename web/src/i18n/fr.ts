@@ -75,13 +75,14 @@ export const fr = {
     messageTooLarge: "Le message dépasse la limite de 5 MiB",
     noRecipient: "Indique au moins un destinataire",
     bounces: (list: string) => `Rejets définitifs : ${list}`,
+    fileReadFailed: "Impossible de lire le fichier",
   },
   identities: {
     title: "Identités",
     add: "Ajouter une identité",
     intro:
       "Les identités disponibles apparaissent dans le sélecteur « De » du formulaire d'envoi. Le nom affiché est celui que verra le destinataire dans son client de messagerie.",
-    readFailed: (detail: string) => `Impossible de lire les identités : ${detail}.`,
+    readFailed: (detail: string) => `Impossible de lire les identités : ${detail}`,
     configFailed:
       "Le domaine de messagerie n'a pas pu être lu : les adresses seraient incomplètes, les identités ne sont donc pas affichées. Rechargez la page.",
     empty: "Aucune identité.",
@@ -117,7 +118,7 @@ export const fr = {
     noDestinationAfter: ", puis cliquez le lien de confirmation reçu par mail.",
     to: "Vers",
     choose: "── choisir ──",
-    readFailed: (detail: string) => `Impossible de lire les redirections : ${detail}.`,
+    readFailed: (detail: string) => `Impossible de lire les redirections : ${detail}`,
     migrationHintBefore: "Si la fonctionnalité vient d'être déployée, la migration",
     migrationHintAfter:
       "n'a peut-être pas été appliquée sur la base D1 (voir l'étape 2 de la mise en service, dans le README).",
@@ -176,7 +177,7 @@ export const fr = {
       unknown_sender: "Expéditeur inconnu.",
       too_large: "Le message dépasse la limite de 5 MiB.",
       send_failed: (detail: string) => `Échec de l'envoi : ${detail}`,
-      unauthenticated: "Session expirée ou accès refusé : rechargez la page.",
+      unauthenticated: (detail: string) => `Accès refusé : ${detail}`,
       internal_error: "Erreur interne du serveur.",
     },
     reasons: {

@@ -175,7 +175,11 @@ describe("ForwardingSettings", () => {
     stubApi({ rulesStatus: 500 });
     render(<ForwardingSettings />, { wrapper });
 
-    expect(await screen.findByText(/Impossible de lire les redirections/)).toBeDefined();
+    // Pas de point double entre le détail et la phrase suivante : readFailed
+    // ne doit plus ajouter son propre "." final (celui-ci se lit "rules Si...").
+    expect(
+      await screen.findByText(/Impossible de lire les redirections : no such table: forward_rules Si/),
+    ).toBeDefined();
     // Un 500 ne doit surtout pas se lire comme « vous n'avez aucune redirection ».
     expect(screen.queryByText("Aucune redirection.")).toBeNull();
   });

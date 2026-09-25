@@ -74,13 +74,14 @@ export const en: Catalog = {
     messageTooLarge: "The message exceeds the 5 MiB limit",
     noRecipient: "Enter at least one recipient",
     bounces: (list) => `Permanent bounces: ${list}`,
+    fileReadFailed: "Could not read the file",
   },
   identities: {
     title: "Identities",
     add: "Add an identity",
     intro:
       "Available identities appear in the “From” selector of the compose form. The display name is what recipients see in their mail client.",
-    readFailed: (detail) => `Could not read identities: ${detail}.`,
+    readFailed: (detail) => `Could not read identities: ${detail}`,
     configFailed:
       "The mail domain could not be read: addresses would be incomplete, so identities are not shown. Reload the page.",
     empty: "No identities.",
@@ -115,7 +116,7 @@ export const en: Catalog = {
     noDestinationAfter: ", then click the confirmation link sent by email.",
     to: "To",
     choose: "── choose ──",
-    readFailed: (detail) => `Could not read forwarding rules: ${detail}.`,
+    readFailed: (detail) => `Could not read forwarding rules: ${detail}`,
     migrationHintBefore: "If the feature was just deployed, the migration",
     migrationHintAfter:
       "may not have been applied to the D1 database (see step 2 of the setup, in the README).",
@@ -169,7 +170,7 @@ export const en: Catalog = {
       unknown_sender: "Unknown sender.",
       too_large: "The message exceeds the 5 MiB limit.",
       send_failed: (detail) => `Send failed: ${detail}`,
-      unauthenticated: "Session expired or access denied: reload the page.",
+      unauthenticated: (detail) => `Access denied: ${detail}`,
       internal_error: "Internal server error.",
     },
     reasons: {

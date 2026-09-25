@@ -8,11 +8,15 @@ type Entry = string | ((serverMessage: string) => string) | undefined;
 // est une fonction reçoit le message du serveur pour en garder le détail.
 export function errorText(err: unknown, t: Catalog): string {
   if (err instanceof ApiError) {
-    const reason: Entry = err.reason ? (t.errors.reasons as Record<string, Entry>)[err.reason] : undefined;
+    const reasons = t.errors.reasons as Record<string, Entry>;
+    const reason: Entry = err.reason && Object.hasOwn(reasons, err.reason) ? reasons[err.reason] : undefined;
     if (typeof reason === "string") return reason;
-    const code: Entry = err.code ? (t.errors.codes as Record<string, Entry>)[err.code] : undefined;
+    const codes = t.errors.codes as Record<string, Entry>;
+    const code: Entry = err.code && Object.hasOwn(codes, err.code) ? codes[err.code] : undefined;
     if (typeof code === "string") return code;
-    if (typeof code === "function") return code(err.message);
+    // Un message serveur vide (ex. 401 sans corps) laisserait un préfixe suivi
+    // de rien de lisible : on retombe alors sur le statut HTTP comme détail.
+    if (typeof code === "function") return code(err.message || t.errors.http(err.status));
     if (err.message) return err.message;
     return t.errors.http(err.status);
   }

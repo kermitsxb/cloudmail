@@ -38,4 +38,20 @@ describe("errorText", () => {
     expect(errorText(new Error("réseau coupé"), fr)).toBe("réseau coupé");
     expect(errorText("pas une erreur", fr)).toBe("Erreur inconnue");
   });
+
+  it("garde le diagnostic opérateur derrière un préfixe traduit pour unauthenticated", () => {
+    expect(errorText(new ApiError("CF_ROUTING_TOKEN manquant", 401, "unauthenticated"), fr))
+      .toBe("Accès refusé : CF_ROUTING_TOKEN manquant");
+    expect(errorText(new ApiError("CF_ROUTING_TOKEN missing", 401, "unauthenticated"), en))
+      .toBe("Access denied: CF_ROUTING_TOKEN missing");
+  });
+
+  it("retombe sur le statut HTTP comme détail quand le message serveur est vide", () => {
+    expect(errorText(new ApiError("", 401, "unauthenticated"), fr)).toBe("Accès refusé : Erreur 401");
+    expect(errorText(new ApiError("", 401, "unauthenticated"), en)).toBe("Access denied: Error 401");
+  });
+
+  it("ignore un code hérité du prototype d'objet et retombe sur le message serveur", () => {
+    expect(errorText(new ApiError("payload attaquant", 400, "constructor"), fr)).toBe("payload attaquant");
+  });
 });

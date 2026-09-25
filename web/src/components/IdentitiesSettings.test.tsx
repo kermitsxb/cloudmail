@@ -145,7 +145,7 @@ describe("IdentitiesSettings", () => {
     stubApi({ identitiesStatus: 500 });
     render(<IdentitiesSettings />, { wrapper });
 
-    expect(await screen.findByText(/Impossible de lire les identités/)).toBeDefined();
+    expect(await screen.findByText("Impossible de lire les identités : panne")).toBeDefined();
     expect(screen.queryByText("Aucune identité.")).toBeNull();
   });
 
