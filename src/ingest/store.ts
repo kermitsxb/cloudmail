@@ -19,15 +19,20 @@ export const attachmentKey = (messageId: string, index: number, filename: string
 // `onWritten` est appelé après chaque écriture réussie : un appelant qui veut nettoyer les
 // objets déjà écrits si une écriture suivante échoue (reparseInPlace, src/admin/reimport.ts)
 // n'a ainsi pas besoin d'attendre le résultat final, jamais renvoyé en cas d'erreur.
+// `keyPrefix` isole chaque message réimporté ; chaque essai reçoit un préfixe unique
+// pour qu'un rollback ne puisse pas supprimer l'objet validé par un autre essai.
 export async function putAttachments(
   env: Env,
   messageId: string,
   attachments: ParsedAttachment[],
   onWritten?: (r2Key: string) => void,
+  keyPrefix?: string,
 ): Promise<StoredAttachment[]> {
   const stored: StoredAttachment[] = [];
+  const attemptPrefix = keyPrefix ? `${keyPrefix}/${crypto.randomUUID()}` : null;
   for (const [i, att] of attachments.entries()) {
-    const r2Key = attachmentKey(messageId, i, att.filename);
+    let r2Key = attachmentKey(messageId, i, att.filename);
+    if (attemptPrefix) r2Key = `${attemptPrefix}/${i}-${sanitizeFilename(att.filename)}`;
     await env.MAIL.put(r2Key, att.content, { httpMetadata: { contentType: att.mimeType } });
     stored.push({ ...att, r2Key });
     onWritten?.(r2Key);

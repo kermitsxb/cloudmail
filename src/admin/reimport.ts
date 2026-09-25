@@ -102,6 +102,28 @@ async function deleteQuietly(env: Env, keys: string[], rawKey: string): Promise<
   }
 }
 
+// Une ancienne clé peut aussi être référencée par un autre message : les identifiants
+// distincts ne garantissent pas des clés distinctes après safeKey/sanitizeFilename.
+async function deleteUnreferencedAttachments(env: Env, keys: string[], rawKey: string): Promise<void> {
+  if (keys.length === 0) return;
+  try {
+    const rows = await env.DB.prepare(
+      "SELECT DISTINCT r2_key FROM attachments WHERE r2_key IN (SELECT value FROM json_each(?))"
+    ).bind(JSON.stringify(keys)).all<{ r2_key: string }>();
+    const referenced = new Set(rows.results.map((row) => row.r2_key));
+    await deleteQuietly(env, keys.filter((key) => !referenced.has(key)), rawKey);
+  } catch (err) {
+    // Le lot D1 est déjà validé. Garder les anciens objets est plus sûr que
+    // déclarer l'opération échouée ou supprimer une clé encore utilisée.
+    console.error(JSON.stringify({
+      event: "reimport_cleanup_failed",
+      key: rawKey,
+      objects: keys,
+      error: err instanceof Error ? err.message : String(err),
+    }));
+  }
+}
+
 // Réanalyse une ligne existante sur place. Seules les colonnes issues du parsing sont
 // réécrites : id, thread_id, folder, is_read, direction et raw_key ne bougent jamais, donc
 // les compteurs du thread non plus, et aucun thread ne peut se retrouver vide.
@@ -116,18 +138,21 @@ async function reparseInPlace(env: Env, rawKey: string, raw: ArrayBuffer, row: E
     if (clash) throw new Error(`Message-ID déjà utilisé par le message #${clash.id}`);
   }
 
-  const oldKeys = (await env.DB.prepare("SELECT r2_key FROM attachments WHERE message_id = ?")
-    .bind(row.id).all<{ r2_key: string }>()).results.map((r) => r.r2_key);
-
-  // R2 d'abord : les nouvelles pièces jointes existent avant la ligne qui les référence.
+  // R2 d'abord, sous des clés propres à cet essai : une panne D1 ne peut pas
+  // altérer les anciens objets.
   // Les clés sont notées au fur et à mesure : si une écriture échoue en cours de route, on
   // retire celles déjà posées pour rien plutôt que de laisser des objets orphelins.
+  // Chaque tentative a ses propres nouvelles clés : un autre réimport qui valide en
+  // parallèle ne peut pas pointer vers un objet que notre rollback supprimera.
   const writtenKeys: string[] = [];
   let stored: Awaited<ReturnType<typeof putAttachments>>;
   try {
-    stored = await putAttachments(env, messageId, msg.attachments, (k) => writtenKeys.push(k));
+    stored = await putAttachments(
+      env, messageId, msg.attachments, (k) => writtenKeys.push(k),
+      `att/reimport/${row.id}`,
+    );
   } catch (err) {
-    await deleteQuietly(env, writtenKeys.filter((k) => !oldKeys.includes(k)), rawKey);
+    await deleteQuietly(env, writtenKeys, rawKey);
     throw err;
   }
   const newKeys = stored.map((s) => s.r2Key);
@@ -140,8 +165,10 @@ async function reparseInPlace(env: Env, rawKey: string, raw: ArrayBuffer, row: E
   const cols = parsedColumns(msg, messageId);
   if (msg.dateSynthetic) cols.receivedAt = row.received_at;
 
+  const recipients = recipientStatements(env.DB, row.id, msg);
+  let batch: Awaited<ReturnType<D1Database["batch"]>>;
   try {
-    await env.DB.batch([
+    batch = await env.DB.batch([
       env.DB.prepare(
         `UPDATE messages
             SET message_id = ?, in_reply_to = ?, from_addr = ?, from_name = ?, subject = ?,
@@ -154,8 +181,8 @@ async function reparseInPlace(env: Env, rawKey: string, raw: ArrayBuffer, row: E
         cols.parseError, cols.bodyTruncated, row.id,
       ),
       env.DB.prepare("DELETE FROM recipients WHERE message_id = ?").bind(row.id),
-      ...recipientStatements(env.DB, row.id, msg),
-      env.DB.prepare("DELETE FROM attachments WHERE message_id = ?").bind(row.id),
+      ...recipients,
+      env.DB.prepare("DELETE FROM attachments WHERE message_id = ? RETURNING r2_key").bind(row.id),
       ...attachmentStatements(env.DB, row.id, stored),
       // La date du message a pu changer : on recalcule celle du thread sur ses messages.
       env.DB.prepare(
@@ -165,15 +192,17 @@ async function reparseInPlace(env: Env, rawKey: string, raw: ArrayBuffer, row: E
       ).bind(row.id),
     ]);
   } catch (err) {
-    // Lot annulé : la ligne pointe toujours vers les anciennes clés. On retire les objets
-    // écrits pour rien ; une clé commune aux deux ensembles a été réécrite avec des octets
-    // tirés du même brut, rien n'est perdu.
-    await deleteQuietly(env, newKeys.filter((k) => !oldKeys.includes(k)), rawKey);
+    // Lot annulé : la ligne pointe toujours vers les anciennes clés.
+    await deleteQuietly(env, newKeys, rawKey);
     throw err;
   }
 
-  // Lot validé : plus rien ne référence les anciennes clés absentes du nouvel ensemble.
-  await deleteQuietly(env, oldKeys.filter((k) => !newKeys.includes(k)), rawKey);
+  // RETURNING donne les clés réellement remplacées par ce lot, même si un
+  // autre réimport a validé entre notre parsing et notre transaction.
+  const displacedKeys = (batch[2 + recipients.length].results as { r2_key: string }[])
+    .map((result) => result.r2_key);
+  // Lot validé : supprimer seulement les objets qu'aucun autre message ne référence.
+  await deleteUnreferencedAttachments(env, displacedKeys.filter((k) => !newKeys.includes(k)), rawKey);
 }
 
 async function reimport(env: Env, rawKey: string): Promise<ReimportResult> {

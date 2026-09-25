@@ -196,8 +196,9 @@ For a key with existing rows (`SELECT … FROM messages WHERE raw_key = ? AND di
    row's stored `received_at`: a new parsing would invent another one (the
    current instant), re-dating the message and bumping its thread on every
    re-import.
-4. **R2 first**: write the new attachments to
-   `att/<safeKey(newMessageId)>/<i>-<sanitizeFilename(name)>`.
+4. **R2 first**: each attempt writes attachments under its own keys, scoped to
+   the D1 row. No attempt overwrites an old object or shares a new key with a
+   concurrent attempt.
 5. **Then one D1 batch**:
    - `UPDATE messages SET message_id, in_reply_to, from_addr, from_name,
      subject, text_body, html_body, snippet, received_at, has_attachments,
@@ -205,15 +206,19 @@ For a key with existing rows (`SELECT … FROM messages WHERE raw_key = ? AND di
      `truncateBody` as in `storeIncoming`; the `messages_au` trigger keeps FTS
      in sync;
    - `DELETE FROM recipients WHERE message_id = ?`, then the new recipients;
-   - `DELETE FROM attachments WHERE message_id = ?`, then the new attachments;
+   - `DELETE FROM attachments WHERE message_id = ? RETURNING r2_key`, then the
+     new attachments; `RETURNING` captures the keys actually displaced by this
+     transaction, including a concurrent re-import's just-committed keys;
    - `UPDATE threads SET last_message_at = (SELECT MAX(received_at) FROM
      messages WHERE thread_id = ?) WHERE id = ?`.
    - Never written: `id`, `thread_id`, `folder`, `is_read`, `direction`,
      `raw_key`. Thread counters are therefore unchanged.
-6. **After commit**: delete old attachment keys absent from the new set.
-7. **If the batch fails**: delete new attachment keys absent from the old set
-   (best effort, failures logged). A key present in both sets was overwritten
-   with bytes derived from the same raw MIME, so nothing is lost.
+6. **After commit**: delete displaced attachment keys absent from the new set only
+   when no attachment row still references them. If the reference check fails,
+   log the cleanup failure and keep the old object without changing the
+   successful re-import outcome.
+7. **If the batch fails**: delete this attempt's new attachment keys (best
+   effort, failures logged). The old D1 row and its objects remain unchanged.
 
 Several rows can share one `raw_key` only when byte-identical copies of a
 message without `Message-ID` were delivered: each got its own invented ID,
@@ -246,8 +251,9 @@ Forward the message, read or write `forward_rules`, or delete a raw MIME object.
 - An R2 or D1 failure during a listing returns 503 with a clear French message
   (the UI is French-only); the SPA shows it and offers to resume from the last
   cursor.
-- Every operation is idempotent: re-importing an already-imported orphan
-  re-parses it; re-parsing twice yields the same row.
+- Re-importing an already-imported orphan re-parses its existing message rather
+  than inserting another one. Repeated parses preserve the message ID and
+  visible content, while replacing attachment keys with each attempt.
 
 ## Safety
 

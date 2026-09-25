@@ -307,8 +307,26 @@ describe("reimportKey — réanalyse sur place", () => {
 
     expect(await env.MAIL.head("att/ancien/0-vieux.csv")).toBeNull();
     const att = await env.DB.prepare("SELECT r2_key FROM attachments WHERE message_id = ?").bind(msg.id).first<{ r2_key: string }>();
-    expect(att!.r2_key).toBe("att/att-1-example.com/0-data.csv");
+    expect(att!.r2_key).not.toBe("att/ancien/0-vieux.csv");
     expect(await env.MAIL.head(att!.r2_key)).not.toBeNull();
+  });
+
+  it("ne garde qu'une pièce jointe référencée après deux réanalyses identiques", async () => {
+    const msg = await ingest(loadBytes("attachment.eml"));
+    await reimportKey(env, msg.rawKey, "dev@localhost");
+    const first = (await env.DB.prepare("SELECT r2_key FROM attachments WHERE message_id = ?")
+      .bind(msg.id).first<{ r2_key: string }>())!.r2_key;
+
+    await reimportKey(env, msg.rawKey, "dev@localhost");
+
+    const second = (await env.DB.prepare("SELECT r2_key FROM attachments WHERE message_id = ?")
+      .bind(msg.id).first<{ r2_key: string }>())!.r2_key;
+    const count = (await env.DB.prepare("SELECT COUNT(*) AS n FROM attachments WHERE message_id = ?")
+      .bind(msg.id).first<{ n: number }>())!.n;
+    expect(second).not.toBe(first);
+    expect(count).toBe(1);
+    expect(await env.MAIL.head(first)).toBeNull();
+    expect(await env.MAIL.head(second)).not.toBeNull();
   });
 
   it("échoue sans rien modifier quand le nouveau Message-ID appartient à un autre message", async () => {
@@ -347,6 +365,108 @@ describe("reimportKey — réanalyse sur place", () => {
     expect(await env.MAIL.head("att/att-ancien-example.com/0-data.csv")).not.toBeNull();
   });
 
+  it("ne remplace pas les octets d'une ancienne pièce jointe si le lot D1 échoue", async () => {
+    const msg = await ingest(loadBytes("attachment.eml"));
+    const oldKey = (await env.DB.prepare("SELECT r2_key FROM attachments WHERE message_id = ?")
+      .bind(msg.id).first<{ r2_key: string }>())!.r2_key;
+    await env.MAIL.put(oldKey, "ancien contenu");
+    const failingDb = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === "batch") return async () => { throw new Error("D1 indisponible"); };
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const result = await reimportKey({ ...env, DB: failingDb }, msg.rawKey, "dev@localhost");
+
+    expect(result).toMatchObject({ outcome: "error", error: "D1 indisponible" });
+    expect(await (await env.MAIL.get(oldKey))!.text()).toBe("ancien contenu");
+  });
+
+  it("conserve une ancienne clé de pièce jointe encore référencée par un autre message", async () => {
+    const msg = await ingest(loadBytes("attachment.eml"));
+    const sharedKey = "att/shared/0-data.csv";
+    await env.MAIL.put(sharedKey, "contenu partagé");
+    await env.DB.prepare("UPDATE attachments SET r2_key = ? WHERE message_id = ?")
+      .bind(sharedKey, msg.id).run();
+    const otherId = await insertRow({ rawKey: "raw/other.eml", messageId: "<other@example.com>" });
+    await env.DB.prepare(
+      "INSERT INTO attachments (message_id, filename, mime_type, size, r2_key) VALUES (?, 'data.csv', 'text/csv', 14, ?)"
+    ).bind(otherId, sharedKey).run();
+
+    const result = await reimportKey(env, msg.rawKey, "dev@localhost");
+
+    expect(result).toMatchObject({ outcome: "reparsed" });
+    expect(await (await env.MAIL.get(sharedKey))!.text()).toBe("contenu partagé");
+  });
+
+  it("confirme la réanalyse si seule la vérification du nettoyage échoue après validation", async () => {
+    const msg = await ingest(loadBytes("attachment.eml"));
+    const oldKey = (await env.DB.prepare("SELECT r2_key FROM attachments WHERE message_id = ?")
+      .bind(msg.id).first<{ r2_key: string }>())!.r2_key;
+    const failingDb = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === "prepare") return (sql: string) => {
+          if (sql.startsWith("SELECT DISTINCT r2_key FROM attachments")) throw new Error("D1 indisponible");
+          return target.prepare(sql);
+        };
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const result = await reimportKey({ ...env, DB: failingDb }, msg.rawKey, "dev@localhost");
+
+    expect(result).toMatchObject({ outcome: "reparsed", messageIds: [msg.id] });
+    expect(await env.MAIL.head(oldKey)).not.toBeNull();
+  });
+
+  it("ne supprime pas la pièce jointe validée par un réimport concurrent", async () => {
+    const msg = await ingest(loadBytes("attachment.eml"));
+    let concurrentResult: Awaited<ReturnType<typeof reimportKey>> | undefined;
+    const failingDb = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === "batch") return async () => {
+          concurrentResult = await reimportKey(env, msg.rawKey, "dev@localhost");
+          throw new Error("D1 indisponible");
+        };
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const failed = await reimportKey({ ...env, DB: failingDb }, msg.rawKey, "dev@localhost");
+
+    expect(failed).toMatchObject({ outcome: "error", error: "D1 indisponible" });
+    expect(concurrentResult).toMatchObject({ outcome: "reparsed" });
+    const key = (await env.DB.prepare("SELECT r2_key FROM attachments WHERE message_id = ?")
+      .bind(msg.id).first<{ r2_key: string }>())!.r2_key;
+    expect(await env.MAIL.head(key)).not.toBeNull();
+  });
+
+  it("nettoie la clé remplacée par deux réimports concurrents réussis", async () => {
+    const msg = await ingest(loadBytes("attachment.eml"));
+    const concurrentDb = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === "batch") return async (statements: D1PreparedStatement[]) => {
+          await reimportKey(env, msg.rawKey, "dev@localhost");
+          return target.batch(statements);
+        };
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const result = await reimportKey({ ...env, DB: concurrentDb }, msg.rawKey, "dev@localhost");
+
+    expect(result).toMatchObject({ outcome: "reparsed" });
+    const key = (await env.DB.prepare("SELECT r2_key FROM attachments WHERE message_id = ?")
+      .bind(msg.id).first<{ r2_key: string }>())!.r2_key;
+    const objects = await env.MAIL.list({ prefix: `att/reimport/${msg.id}/` });
+    expect(objects.objects.map((object) => object.key)).toEqual([key]);
+  });
+
   it("nettoie les pièces jointes déjà écrites si une écriture R2 échoue en cours de réanalyse", async () => {
     // Ligne existante sans aucune pièce jointe : celles écrites pendant la réanalyse sont
     // donc entièrement nouvelles, aucune ne préexiste sous le même nom.
@@ -375,7 +495,7 @@ describe("reimportKey — réanalyse sur place", () => {
     const result = await reimportKey({ ...env, MAIL: failingMail }, rawKey, "dev@localhost");
 
     expect(result).toMatchObject({ outcome: "error", error: "R2 indisponible" });
-    const remaining = await env.MAIL.list({ prefix: "att/two-att-example.com/" });
+    const remaining = await env.MAIL.list({ prefix: `att/reimport/${id}/` });
     expect(remaining.objects).toHaveLength(0);
     expect((await messageRow(id))!.subject).toBe(before!.subject);
   });

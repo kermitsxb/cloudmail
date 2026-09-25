@@ -127,9 +127,13 @@ It is exposed through `POST /api/admin/reimport` (1 to 10 keys, each matching
   insert a duplicate. An invented ID never overwrites the stored one, and
   likewise an invented date (`dateSynthetic`) never overwrites the stored
   `received_at`.
-- **Attachment order**: new objects are written before the batch; old keys
-  absent from the new set are deleted after it commits; if the batch fails,
-  new keys absent from the old set are deleted.
+- **Attachment order**: each re-import attempt writes attachments under its
+  own keys, scoped to the D1 row. New objects are written before the batch;
+  `DELETE … RETURNING` captures the keys actually displaced by the transaction.
+  Displaced keys absent from the new set are deleted after commit only if no other row
+  references them; if the batch fails, the attempt's new keys are deleted.
+  A failed post-commit reference check leaves the old objects in R2
+  and is logged without changing the successful re-import outcome.
 - **It never forwards**, never touches `forward_rules`, and never deletes a
   raw MIME object.
 
