@@ -49,12 +49,13 @@ const thread: ThreadDetail = {
   ],
 };
 
-function renderThreadView() {
+function renderThreadView({ locale }: { locale?: "fr" | "en" } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <ThreadView threadId={1} />
     </QueryClientProvider>,
+    { locale },
   );
 }
 
@@ -173,5 +174,12 @@ describe("ThreadView", () => {
 
     await screen.findByRole("button", { name: /Répondre/ });
     expect(screen.queryByRole("button", { name: "Réimporter" })).toBeNull();
+  });
+
+  it("s'affiche en anglais", async () => {
+    // Même fixture que « déplie le dernier message par défaut… ».
+    renderThreadView({ locale: "en" });
+    expect(await screen.findByRole("button", { name: "Reply" })).toBeDefined();
+    expect(screen.getByText(/^\d+ messages?$/)).toBeDefined();
   });
 });

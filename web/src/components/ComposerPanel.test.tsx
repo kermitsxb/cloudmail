@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ComposerPanel } from "./ComposerPanel";
+import { renderWithI18n as render } from "../test/i18n";
 
 describe("ComposerPanel", () => {
   it("affiche le titre et les enfants", () => {

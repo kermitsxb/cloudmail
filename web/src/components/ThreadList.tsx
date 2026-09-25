@@ -1,13 +1,5 @@
 import type { ThreadSummary } from "../api/client";
-
-const formatDate = (epoch: number) => {
-  const d = new Date(epoch * 1000);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  return sameDay
-    ? d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
-};
+import { useI18n } from "../i18n";
 
 export function ThreadList({
   threads,
@@ -24,39 +16,49 @@ export function ThreadList({
   isLoadingMore?: boolean;
   onLoadMore?: () => void;
 }) {
+  const { t, formatDate } = useI18n();
+
+  const formatWhen = (epoch: number) => {
+    const d = new Date(epoch * 1000);
+    const sameDay = d.toDateString() === new Date().toDateString();
+    return sameDay
+      ? formatDate(d, { hour: "2-digit", minute: "2-digit" })
+      : formatDate(d, { day: "numeric", month: "short" });
+  };
+
   if (threads.length === 0) {
-    return <p className="p-8 text-center text-sm text-muted-foreground">Aucun message ici.</p>;
+    return <p className="p-8 text-center text-sm text-muted-foreground">{t.threadList.empty}</p>;
   }
 
   return (
     <>
-    <ul role="listbox" aria-label="Conversations" className="divide-y">
-      {threads.map((t) => (
+    <ul role="listbox" aria-label={t.threadList.label} className="divide-y">
+      {threads.map((thread) => (
         <li
-          key={t.id}
+          key={thread.id}
           role="option"
-          aria-selected={t.id === selectedId}
-          data-unread={t.unreadCount > 0 ? "true" : "false"}
+          aria-selected={thread.id === selectedId}
+          data-unread={thread.unreadCount > 0 ? "true" : "false"}
           tabIndex={0}
-          onClick={() => onSelect(t.id)}
+          onClick={() => onSelect(thread.id)}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
-              onSelect(t.id);
+              onSelect(thread.id);
             }
           }}
           className="cursor-pointer px-4 py-3 hover:bg-accent data-[unread=true]:font-semibold aria-selected:bg-accent"
         >
           <div className="flex items-baseline justify-between gap-2">
-            <span className="truncate text-sm">{t.participants.join(", ")}</span>
-            <time className="shrink-0 text-xs text-muted-foreground">{formatDate(t.lastMessageAt)}</time>
+            <span className="truncate text-sm">{thread.participants.join(", ")}</span>
+            <time className="shrink-0 text-xs text-muted-foreground">{formatWhen(thread.lastMessageAt)}</time>
           </div>
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm">{t.subject}</span>
-            {t.messageCount > 1 && <span className="text-xs text-muted-foreground">{t.messageCount}</span>}
-            {t.hasAttachments && <span aria-label="Contient une pièce jointe">📎</span>}
+            <span className="truncate text-sm">{thread.subject}</span>
+            {thread.messageCount > 1 && <span className="text-xs text-muted-foreground">{thread.messageCount}</span>}
+            {thread.hasAttachments && <span aria-label={t.threadList.hasAttachment}>📎</span>}
           </div>
-          <p className="truncate text-xs font-normal text-muted-foreground">{t.snippet}</p>
+          <p className="truncate text-xs font-normal text-muted-foreground">{thread.snippet}</p>
         </li>
       ))}
     </ul>
@@ -68,7 +70,7 @@ export function ThreadList({
           onClick={() => onLoadMore?.()}
           className="rounded border border-border px-3 py-1 text-xs hover:bg-accent disabled:opacity-50"
         >
-          {isLoadingMore ? "Chargement…" : "Charger plus"}
+          {isLoadingMore ? t.common.loading : t.threadList.loadMore}
         </button>
       </div>
     )}

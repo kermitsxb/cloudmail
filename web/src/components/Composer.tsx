@@ -3,6 +3,8 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { useIdentities, useSendMessage, type MessageDetail } from "../api/client";
+import { useI18n } from "../i18n";
+import { errorText } from "../lib/errors";
 
 // Calque exact de `payloadSize` côté Worker (src/send/client.ts) : mesure la taille du
 // message tel qu'il sera transmis (chaînes base64 telles quelles, pas les octets décodés)
@@ -63,6 +65,7 @@ export function Composer({
   replyTo?: MessageDetail;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const { data: identities } = useIdentities();
   const sendMessage = useSendMessage();
 
@@ -102,7 +105,7 @@ export function Composer({
       attachments: merged,
     });
     if (size > MAX_PAYLOAD_BYTES) {
-      setFileError("L'ensemble dépasse la limite de 5 MiB");
+      setFileError(t.composer.attachmentsTooLarge);
       return;
     }
     setFileError(null);
@@ -119,13 +122,13 @@ export function Composer({
 
     const recipients = parseRecipients(to);
     if (recipients.length === 0) {
-      setError("Indique au moins un destinataire");
+      setError(t.composer.noRecipient);
       return;
     }
 
     const size = payloadSize({ subject, text, to: recipients, attachments });
     if (size > MAX_PAYLOAD_BYTES) {
-      setError("Le message dépasse la limite de 5 MiB");
+      setError(t.composer.messageTooLarge);
       return;
     }
 
@@ -147,7 +150,7 @@ export function Composer({
           onClose();
         },
         onError: (err) => {
-          setError(err.message);
+          setError(errorText(err, t));
         },
       },
     );
@@ -165,20 +168,20 @@ export function Composer({
 
       {bounces && bounces.length > 0 && (
         <div role="alert" className="flex flex-col gap-2 rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <p>Rejets définitifs : {bounces.join(", ")}</p>
+          <p>{t.composer.bounces(bounces.join(", "))}</p>
           <Button type="button" size="sm" variant="outline" onClick={onClose}>
-            Fermer
+            {t.common.close}
           </Button>
         </div>
       )}
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-from" className="text-xs font-medium text-muted-foreground">
-          De
+          {t.composer.from}
         </label>
         <select
           id="composer-from"
-          aria-label="De"
+          aria-label={t.composer.from}
           value={from}
           onChange={(e) => setFromOverride(e.target.value)}
           className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none"
@@ -193,11 +196,11 @@ export function Composer({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-to" className="text-xs font-medium text-muted-foreground">
-          Destinataires
+          {t.composer.to}
         </label>
         <Input
           id="composer-to"
-          aria-label="Destinataires"
+          aria-label={t.composer.to}
           value={to}
           onChange={(e) => setTo(e.target.value)}
           placeholder="zoe@example.com, bob@example.com"
@@ -206,11 +209,11 @@ export function Composer({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-subject" className="text-xs font-medium text-muted-foreground">
-          Objet
+          {t.composer.subject}
         </label>
         <Input
           id="composer-subject"
-          aria-label="Objet"
+          aria-label={t.composer.subject}
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
         />
@@ -218,11 +221,11 @@ export function Composer({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-text" className="text-xs font-medium text-muted-foreground">
-          Message
+          {t.composer.message}
         </label>
         <Textarea
           id="composer-text"
-          aria-label="Message"
+          aria-label={t.composer.message}
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={8}
@@ -231,11 +234,11 @@ export function Composer({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="composer-attachments" className="text-xs font-medium text-muted-foreground">
-          Pièces jointes
+          {t.composer.attachments}
         </label>
         <input
           id="composer-attachments"
-          aria-label="Pièces jointes"
+          aria-label={t.composer.attachments}
           type="file"
           multiple
           onChange={handleFileChange}
@@ -246,7 +249,7 @@ export function Composer({
             {attachments.map((a, i) => (
               <li key={`${a.filename}-${i}`} className="flex items-center gap-1 rounded border border-border px-2 py-1 text-xs">
                 {a.filename}
-                <button type="button" onClick={() => removeAttachment(i)} aria-label={`Retirer ${a.filename}`}>
+                <button type="button" onClick={() => removeAttachment(i)} aria-label={t.composer.removeAttachment(a.filename)}>
                   ×
                 </button>
               </li>
@@ -257,10 +260,10 @@ export function Composer({
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onClose}>
-          Annuler
+          {t.common.cancel}
         </Button>
         <Button type="submit" disabled={sendMessage.isPending}>
-          Envoyer
+          {t.composer.send}
         </Button>
       </div>
     </form>

@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer";
+import { renderWithI18n as render } from "../test/i18n";
 
 const wrap = (ui: React.ReactElement) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -105,6 +106,13 @@ describe("Composer", () => {
     wrap(<Composer mode="new" onClose={() => {}} />);
     await userEvent.type(await screen.findByLabelText("Destinataires"), "zoe@example.com");
     await userEvent.click(screen.getByRole("button", { name: "Envoyer" }));
-    expect(await screen.findByText("Domaine non vérifié")).toBeDefined();
+    expect(await screen.findByText("Échec de l'envoi : Domaine non vérifié")).toBeDefined();
+  });
+
+  it("s'affiche en anglais", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={qc}><Composer mode="new" onClose={() => {}} /></QueryClientProvider>, { locale: "en" });
+    expect(await screen.findByLabelText("To")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
   });
 });

@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MessageBody } from "./MessageBody";
+import { renderWithI18n as render } from "../test/i18n";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) =>
