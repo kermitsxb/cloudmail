@@ -162,6 +162,20 @@ describe("purgeMessage", () => {
     expect(t).toMatchObject({ message_count: 1, unread_count: 1 });
   });
 
+  it("ne supprime pas un raw_key encore référencé par une autre ligne", async () => {
+    // Deux messages distincts partageant le même raw_key (mêmes octets livrés deux fois sans
+    // Message-Id, donc deux ids synthétiques) : purger l'un ne doit pas emporter l'archive brute
+    // de l'autre.
+    await env.DB.prepare("UPDATE messages SET raw_key = 'raw/shared.eml' WHERE id IN (1, 2)").run();
+    await env.MAIL.put("raw/shared.eml", "brut partagé");
+
+    expect(await purgeMessage(env as unknown as Env, 1)).toBe(true);
+
+    expect(await env.DB.prepare("SELECT id FROM messages WHERE id = 1").first()).toBeNull();
+    expect(await env.DB.prepare("SELECT id FROM messages WHERE id = 2").first()).not.toBeNull();
+    expect(await env.MAIL.get("raw/shared.eml")).not.toBeNull();
+  });
+
   it("supprime les objets R2 avant la ligne D1 : si R2 échoue, la ligne D1 reste intacte", async () => {
     await env.MAIL.put("raw/m1.eml", "brut");
     const wrappedEnv = {

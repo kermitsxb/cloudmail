@@ -81,7 +81,10 @@ the still-present D1 row as its address. The reverse order was tried and
 rejected: once the row is gone, `raw_key`/`r2_key` go with it and an R2 failure
 leaves unrecoverable orphans of sensitive content. The residue of the chosen
 order (a row pointing to deleted objects) is visible — 404 on the attachment or
-raw — and repairable by re-running the purge.
+raw — and repairable by re-running the purge. A raw MIME object is only
+deleted when no other row still references its `raw_key` — two rows can share
+one when the same bytes were delivered twice under different synthetic
+message IDs.
 
 Deletion is two-step in the UI: `PATCH /api/messages/:id` with `folder:
 "trash"` moves to trash (restoring picks `inbox` or `sent` from the message
