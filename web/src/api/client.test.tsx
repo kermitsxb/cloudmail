@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  reimportInBatches,
   useCreateForwardRule,
   useCreateIdentity,
   useDeleteForwardRule,
@@ -10,6 +11,7 @@ import {
   useForwardRules,
   useThreads,
   useUpdateIdentity,
+  type ReimportResult,
 } from "./client";
 
 const wrapper = ({ children }: { children: ReactNode }) => {
@@ -182,5 +184,40 @@ describe("hooks d'identités", () => {
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe("/api/identities/thomas%40exemple.com");
     expect(init.method).toBe("DELETE");
+  });
+});
+
+describe("reimportInBatches", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("envoie les clés par lots de dix et remonte les résultats lot par lot", async () => {
+    const bodies: string[][] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const { keys } = JSON.parse(String(init!.body)) as { keys: string[] };
+      bodies.push(keys);
+      return Response.json({ results: keys.map((key) => ({ key, outcome: "not_found" })) });
+    }));
+    const keys = Array.from({ length: 12 }, (_, i) => `raw/${String(i).padStart(64, "0")}.eml`);
+    const batches: ReimportResult[][] = [];
+
+    await reimportInBatches(keys, (r) => batches.push(r));
+
+    expect(bodies.map((b) => b.length)).toEqual([10, 2]);
+    expect(batches.flat().map((r) => r.key)).toEqual(keys);
+  });
+
+  it("s'arrête au premier lot en échec après avoir remonté les précédents", async () => {
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      call++;
+      if (call === 2) return Response.json({ error: { code: "internal_error", message: "Erreur interne" } }, { status: 500 });
+      const { keys } = JSON.parse(String(init!.body)) as { keys: string[] };
+      return Response.json({ results: keys.map((key) => ({ key, outcome: "imported", messageIds: [1] })) });
+    }));
+    const keys = Array.from({ length: 15 }, (_, i) => `raw/${String(i).padStart(64, "0")}.eml`);
+    const batches: ReimportResult[][] = [];
+
+    await expect(reimportInBatches(keys, (r) => batches.push(r))).rejects.toThrow("Erreur interne");
+    expect(batches).toHaveLength(1);
   });
 });

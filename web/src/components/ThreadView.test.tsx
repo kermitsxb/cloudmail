@@ -23,6 +23,7 @@ const thread: ThreadDetail = {
       isRead: false,
       parseError: false,
       bodyTruncated: false,
+      rawKey: "raw/a.eml",
       attachments: [],
     },
     {
@@ -40,6 +41,7 @@ const thread: ThreadDetail = {
       isRead: false,
       parseError: false,
       bodyTruncated: false,
+      rawKey: "raw/b.eml",
       attachments: [{ id: 99, filename: "facture.pdf", mimeType: "application/pdf", size: 1234 }],
     },
   ],
