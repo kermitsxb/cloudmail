@@ -118,6 +118,7 @@ All the logic; routes stay thin.
 type ReimportResult =
   | { key: string; outcome: "imported"; messageIds: number[] }
   | { key: string; outcome: "reparsed"; messageIds: number[] }
+  | { key: string; outcome: "duplicate"; messageIds: number[] }
   | { key: string; outcome: "not_found" }
   | { key: string; outcome: "error"; error: string };
 ```
@@ -128,8 +129,15 @@ Dispatch in `reimportKey`:
 | --- | --- | --- |
 | No R2 object at `rawKey` | nothing | `not_found` |
 | Object, no incoming row with this `raw_key` | `storeIncoming` | `imported` |
+| Same, but its `Message-ID` already belongs to another row | nothing (`storeIncoming` reports a duplicate) | `duplicate`, with that row's id |
 | Object, one or more incoming rows | in-place re-parse of each row | `reparsed` |
 | Any exception | caught, logged | `error` |
+
+`duplicate` covers a real case: the same message delivered twice with
+different bytes (e.g. different `Received` headers) has two raw keys but one
+`Message-ID`. The second copy is an orphan that importing cannot resolve; it
+is reported as such rather than as an error or a false `imported`, and keeps
+appearing in scans.
 
 `reparse()` is removed from `src/email.ts`; `reimportKey` replaces it.
 
@@ -155,7 +163,8 @@ All behind `requireAccess()`, like the rest of `/api/*`.
     and per-key results.
 - A **Re-import** action in `ThreadView` on incoming messages only (outgoing
   messages have a `sent/…` key with no R2 object). It sends that message's
-  `raw_key` and refreshes the thread.
+  `raw_key` and refreshes the thread. `MessageDetail` (`src/db/queries.ts`
+  and its SPA mirror) gains `rawKey` for this.
 - `web/src/api/client.ts` gains the three calls and their hooks.
 
 ## Data flow
