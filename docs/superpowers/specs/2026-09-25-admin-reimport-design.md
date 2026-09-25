@@ -192,6 +192,10 @@ For a key with existing rows (`SELECT … FROM messages WHERE raw_key = ? AND di
 1. Read the raw MIME from R2 once for all rows.
 2. For each row, parse with the row's `from_addr` as envelope sender.
 3. `newMessageId = parsed.messageIdSynthetic ? row.message_id : parsed.messageId`.
+   Likewise, an invented date (`parsed.dateSynthetic`) never overwrites the
+   row's stored `received_at`: a new parsing would invent another one (the
+   current instant), re-dating the message and bumping its thread on every
+   re-import.
 4. **R2 first**: write the new attachments to
    `att/<safeKey(newMessageId)>/<i>-<sanitizeFilename(name)>`.
 5. **Then one D1 batch**:

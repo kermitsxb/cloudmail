@@ -124,7 +124,9 @@ It is exposed through `POST /api/admin/reimport` (1 to 10 keys, each matching
   thread counters never move and no thread is ever emptied. Rows are found by
   `raw_key`, not by the freshly parsed `Message-ID`: an invented ID
   (`messageIdSynthetic`) changes on every parse, and looking it up used to
-  insert a duplicate. An invented ID never overwrites the stored one.
+  insert a duplicate. An invented ID never overwrites the stored one, and
+  likewise an invented date (`dateSynthetic`) never overwrites the stored
+  `received_at`.
 - **Attachment order**: new objects are written before the batch; old keys
   absent from the new set are deleted after it commits; if the batch fails,
   new keys absent from the old set are deleted.

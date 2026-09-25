@@ -115,7 +115,9 @@ pnpm run migrate:remote
 
 **When upgrading an existing installation, run this again before deploying.**
 It's harmless when there's nothing new, and a missing migration fails
-silently (for example, forwarding just stops working).
+silently (for example, forwarding just stops working). This release adds
+`migrations/0003_raw_key_index.sql`, so `pnpm run migrate:remote` must run
+before `pnpm run deploy`.
 
 ### 3. Add your sending identity
 
