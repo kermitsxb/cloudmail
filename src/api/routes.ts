@@ -115,10 +115,14 @@ const reimportBody = z.object({
 // `.refine()` qu'un utilisateur peut déclencher depuis un formulaire. Les issues
 // `custom` portent un message rédigé ici même, plus précis qu'une formulation
 // générique par chemin de champ : on les préfère dès qu'il en existe une.
+const isCustomIssue = (issue: z.core.$ZodIssue): issue is z.core.$ZodIssueCustom => issue.code === "custom";
+
 const validationError = (error: z.ZodError): { message: string; reason?: string } => {
-  const custom = error.issues.filter((issue) => issue.code === "custom");
+  const custom = error.issues.filter(isCustomIssue);
+  // Un seul `reason` est retenu : à ce jour, au plus un `.refine()` exposant une
+  // raison au client existe par schéma, donc le premier trouvé est le bon.
   const reason = custom
-    .map((issue) => (issue as { params?: { reason?: unknown } }).params?.reason)
+    .map((issue) => issue.params?.reason)
     .find((r): r is string => typeof r === "string");
   const message = custom.length > 0
     ? custom.map((issue) => issue.message).join("; ")
