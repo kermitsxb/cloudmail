@@ -5,6 +5,9 @@
   "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // Maintenance planifiée (src/maintenance/run.ts), une fois par nuit. Le plan gratuit
+  // n'autorise qu'un déclencheur Cron par Worker : les deux tâches le partagent.
+  "triggers": { "crons": ["17 3 * * *"] },
   // Placeholder. Le sous-domaine réel n'est PAS versionné : il vit dans
   // wrangler.overrides.json (ignoré par git), appliqué au déploiement par
   // scripts/config.mjs. Voir « Ne jamais versionner de valeur propre à votre

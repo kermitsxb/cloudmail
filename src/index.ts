@@ -4,6 +4,7 @@ import type { Env } from "./env";
 import { handleEmail } from "./email";
 import { requireAccess } from "./auth/access";
 import { api } from "./api/routes";
+import { runMaintenance } from "./maintenance/run";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -61,4 +62,9 @@ export { app };
 export default {
   fetch: app.fetch,
   email: handleEmail,
+  // runMaintenance ne lève jamais : un échec devient la colonne error du passage, visible
+  // dans la vue Maintenance, plutôt qu'un échec du déclencheur Cron que personne ne regarde.
+  scheduled: (controller, env, ctx) => {
+    ctx.waitUntil(runMaintenance(env, Math.floor(controller.scheduledTime / 1000)));
+  },
 } satisfies ExportedHandler<Env>;
