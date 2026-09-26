@@ -17,7 +17,7 @@ describe("parseAuthentication", () => {
       h("received", "from mail.example.com by cloudflare-email.net"),
       h("authentication-results", CLOUDFLARE),
       h("x-cf-spamh-score", "0"),
-    ])).toEqual({ spf: "pass", dkim: "pass", dmarc: "pass", spamScore: 0 });
+    ])).toEqual({ spf: "pass", dkim: "pass", dmarc: "pass", spamScore: 0, trust: "trusted" });
   });
 
   it("lit une valeur sur une seule ligne comme une valeur repliée", () => {
@@ -39,13 +39,13 @@ describe("parseAuthentication", () => {
     expect(parseAuthentication([
       h("authentication-results", "mx.example.com; dmarc=pass"),
       h("authentication-results", "mx.cloudflare.net; dmarc=fail"),
-    ])).toEqual({ ...NO_AUTH });
+    ])).toEqual({ ...NO_AUTH, trust: "foreign_authserv" });
   });
 
   it("refuse un identifiant qui ressemble seulement à celui de Cloudflare", () => {
     for (const id of ["mx.cloudflare.net.example.com", "mx.cloudflare.net2", "cloudflare.net"]) {
       const res = parseAuthentication([h("authentication-results", `${id}; dmarc=pass; spf=pass; dkim=pass`)]);
-      expect(res).toEqual({ ...NO_AUTH });
+      expect(res).toEqual({ ...NO_AUTH, trust: "foreign_authserv" });
     }
   });
 
@@ -76,12 +76,14 @@ describe("parseAuthentication", () => {
 
   it("met en minuscules et écarte les valeurs inconnues", () => {
     const res = parseAuthentication([h("authentication-results", "mx.cloudflare.net; DMARC=FAIL; dkim=bestguesspass; spf=policy")]);
-    expect(res).toEqual({ spf: null, dkim: null, dmarc: "fail", spamScore: null });
+    expect(res).toEqual({ spf: null, dkim: null, dmarc: "fail", spamScore: null, trust: "trusted" });
   });
 
   it("renvoie des verdicts vides pour « none » sans méthode, ou sans en-tête", () => {
-    expect(parseAuthentication([h("authentication-results", "mx.cloudflare.net; none")])).toEqual({ ...NO_AUTH });
-    expect(parseAuthentication([])).toEqual({ ...NO_AUTH });
+    // En-tête Cloudflare présent mais sans méthode : de confiance, simplement vide.
+    expect(parseAuthentication([h("authentication-results", "mx.cloudflare.net; none")]))
+      .toEqual({ ...NO_AUTH, trust: "trusted" });
+    expect(parseAuthentication([])).toEqual({ ...NO_AUTH, trust: "missing" });
   });
 
   it("ne garde qu'un score entier", () => {

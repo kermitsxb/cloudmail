@@ -1,5 +1,5 @@
 import { env, applyD1Migrations } from "cloudflare:test";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_BODY_BYTES, storeIncoming, attachmentKey } from "../../src/ingest/store";
 import { listThreads } from "../../src/db/queries";
 
@@ -269,6 +269,60 @@ describe("storeIncoming — authentification et spam", () => {
       subject: "Re: Facture réglée",
       snippet: "Nouveau RIB en pièce jointe.",
     });
+  });
+});
+
+describe("storeIncoming — verdict non fiable", () => {
+  const untrustedLogs = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls
+      .map(([line]) => { try { return JSON.parse(String(line)); } catch { return null; } })
+      .filter((l) => l?.event === "auth_untrusted");
+
+  it("journalise auth_untrusted (missing) pour un message sans en-tête Authentication-Results", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await storeIncoming(env, await load("simple.eml"), envelope);
+      expect(untrustedLogs(warn)).toEqual([
+        { event: "auth_untrusted", reason: "missing", messageId: "<simple-1@example.com>" },
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("journalise auth_untrusted (foreign_authserv) quand le premier en-tête ne vient pas de Cloudflare", async () => {
+    const raw = new TextEncoder().encode(
+      [
+        "Authentication-Results: mx.example.com; dmarc=pass",
+        "From: Zoé Martin <zoe@example.com>",
+        "To: you@example.com",
+        "Subject: Bonjour",
+        "Message-ID: <foreign-1@example.com>",
+        "Date: Mon, 08 Sep 2026 12:00:00 +0200",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "Salut.",
+      ].join("\r\n"),
+    ).buffer as ArrayBuffer;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await storeIncoming(env, raw, envelope);
+      expect(untrustedLogs(warn)).toEqual([
+        { event: "auth_untrusted", reason: "foreign_authserv", messageId: "<foreign-1@example.com>" },
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("ne journalise rien pour un message portant l'en-tête Cloudflare", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await storeIncoming(env, await load("authenticated.eml"), envelope);
+      expect(untrustedLogs(warn)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

@@ -81,6 +81,17 @@ same catch-all rule twice. `*` is not a valid local part, so it can't collide.
 anything the sender wrote; a forged `mx.cloudflare.net` header further down
 is never read. Never search the headers for "any" Cloudflare line.
 
+The rule assumes Cloudflare always prepends its own header. That holds on a
+real installation, but cloudflare/workerd#6740 reports it missing in some
+setups. If it ever stops, the first header is whatever the sender wrote, and
+one claiming `mx.cloudflare.net` would be trusted. A message with no trusted
+verdict is logged as `{ event: "auth_untrusted", reason, messageId }`, with
+`reason` `missing` (no header at all) or `foreign_authserv` (first header
+from another authserv-id); `parseAuthentication` reports it in `trust`, which
+is never stored. A run of `auth_untrusted` lines on ordinary mail is the
+signal that the assumption broke. Don't add a `Received`-position check
+instead: a sender talking directly to Cloudflare's MX can forge that too.
+
 Only `dmarc=fail` files a message in `spam` (`storeIncoming`). Email Routing
 already rejects SPF+DKIM failures and DMARC failures under
 `quarantine`/`reject`, so what reaches the Worker is the `p=none` grey zone.

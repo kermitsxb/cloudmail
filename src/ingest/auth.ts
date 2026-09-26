@@ -8,14 +8,22 @@
 
 export type AuthVerdict = "pass" | "fail" | "softfail" | "neutral" | "none" | "temperror" | "permerror";
 
+// Provenance des verdicts : « trusted » quand le premier en-tête vient de Cloudflare,
+// « missing » sans aucun en-tête, « foreign_authserv » quand le premier en vient d'ailleurs.
+// Sert uniquement à journaliser les messages sans verdict fiable ; jamais stocké en D1.
+export type AuthTrust = "trusted" | "missing" | "foreign_authserv";
+
 export type AuthResults = {
   spf: AuthVerdict | null;
   dkim: AuthVerdict | null;
   dmarc: AuthVerdict | null;
   spamScore: number | null;
+  trust: AuthTrust;
 };
 
-export const NO_AUTH: AuthResults = Object.freeze({ spf: null, dkim: null, dmarc: null, spamScore: null });
+export const NO_AUTH: AuthResults = Object.freeze({
+  spf: null, dkim: null, dmarc: null, spamScore: null, trust: "missing",
+});
 
 const TRUSTED_AUTHSERV_ID = "mx.cloudflare.net";
 
@@ -61,7 +69,7 @@ export function parseAuthentication(headers: { key: string; value: string }[]): 
   if (!first) return { ...NO_AUTH, spamScore };
 
   const { authservId, clauses } = parseClauses(first.value);
-  if (authservId !== TRUSTED_AUTHSERV_ID) return { ...NO_AUTH, spamScore };
+  if (authservId !== TRUSTED_AUTHSERV_ID) return { ...NO_AUTH, spamScore, trust: "foreign_authserv" };
 
   const of = (method: string) => clauses.filter((c) => c.method === method);
   const spf = of("spf");
@@ -74,5 +82,6 @@ export function parseAuthentication(headers: { key: string; value: string }[]): 
     dkim: toVerdict(dkim.some((c) => c.result === "pass") ? "pass" : dkim[0]?.result),
     dmarc: toVerdict(of("dmarc")[0]?.result),
     spamScore,
+    trust: "trusted",
   };
 }

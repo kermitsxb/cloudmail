@@ -134,6 +134,13 @@ export async function storeIncoming(
 
   const msg = await parseEmail(raw, envelope.from);
 
+  // Sans verdict de confiance, le message n'est jamais classé en spam : un en-tête
+  // Cloudflare qui cesserait d'être posé passerait donc inaperçu. Cette ligne de journal
+  // est le signal à surveiller (AGENTS.md, « Authentication verdicts… »).
+  if (msg.auth.trust !== "trusted") {
+    console.warn(JSON.stringify({ event: "auth_untrusted", reason: msg.auth.trust, messageId: msg.messageId }));
+  }
+
   const participants = [
     msg.from.address,
     ...msg.to.map((a) => a.address),
