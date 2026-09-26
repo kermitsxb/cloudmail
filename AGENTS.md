@@ -260,7 +260,7 @@ Everything read by `Env` (`src/env.ts`):
 | `ACCESS_AUD` | secret | `wrangler secret put` | unused (bypass) | `src/auth/access.ts` — JWT audience |
 | `ALLOWED_EMAILS` | secret | `wrangler secret put` | unused (bypass) | `src/auth/access.ts` — comma-separated allow-list |
 | `MAIL_DOMAIN` | var | `wrangler.overrides.json` → `vars` | `wrangler.jsonc` placeholder | `src/api/routes.ts` — `Message-ID` domain, `GET /api/config` |
-| `TRASH_RETENTION_DAYS` | var | `wrangler.jsonc` default `"30"`, override in `wrangler.overrides.json` | `wrangler.jsonc` | `src/maintenance/trash.ts` — trash retention; `0`/missing/invalid disables the purge |
+| `TRASH_RETENTION_DAYS` | var | `wrangler.jsonc` default `"30"`, override in `wrangler.overrides.json` | `wrangler.jsonc` | `src/maintenance/trash.ts` — trash and spam retention; `0`/missing/invalid disables the purge |
 | `DEV_BYPASS_AUTH` | var | **never** | `.dev.vars` (`=1`) | `src/auth/access.ts` — skips Access, identity `dev@localhost` |
 
 The two API tokens are deliberately separate (least privilege): a leaked

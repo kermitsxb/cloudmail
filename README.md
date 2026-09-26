@@ -11,7 +11,7 @@ installation is configured with its own domain and its own sending identities.
 
 ## Features
 
-- **Inbox, Sent and Trash**, with conversations grouped into threads
+- **Inbox, Sent, Spam and Trash**, with conversations grouped into threads
 - **Full-text search** across subjects, senders and message bodies
 - **Compose and reply** from any of your sending identities, each with its own
   display name
@@ -323,7 +323,17 @@ include them.
 
 This release carries migration `0006`, which rebuilds the `messages` table;
 run `pnpm run migrate:remote` before `pnpm run deploy`. Messages received
-earlier have no verdicts until re-imported.
+earlier have no verdicts until re-imported. Note a D1 Time Travel bookmark
+first, so you can restore the database to its state just before the
+migration:
+
+```bash
+pnpm wrangler d1 time-travel info cloudmail -c .wrangler/generated.jsonc
+```
+
+The rebuild copies every message into a new table, so it temporarily doubles
+the storage used by `messages`. It runs as a single migration: if it fails,
+it rolls back with no data lost.
 
 ## Roadmap
 
