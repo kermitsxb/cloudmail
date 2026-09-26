@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useThreads } from "./api/client";
 import { ForwardingSettings } from "./components/ForwardingSettings";
 import { IdentitiesSettings } from "./components/IdentitiesSettings";
@@ -9,23 +9,37 @@ import { ThreadList } from "./components/ThreadList";
 import { ThreadView } from "./components/ThreadView";
 import { TrashNotice } from "./components/TrashNotice";
 import { useI18n } from "./i18n";
+import { parseRoute, routePath, type MailRoute } from "./lib/route";
 
 const queryClient = new QueryClient();
 
 function Mailbox() {
   const { t } = useI18n();
-  const [folder, setFolder] = useState("inbox");
+  const [{ folder, threadId: selectedThreadId }, setRoute] = useState<MailRoute>(() =>
+    parseRoute(window.location.pathname),
+  );
   const [query, setQuery] = useState("");
-  const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [view, setView] = useState<"mail" | "forwarding" | "identities" | "maintenance">("mail");
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, refetch, isRefetching } = useThreads(folder, query);
   const threads = data?.pages.flatMap((p) => p.threads) ?? [];
 
-  const handleSelectFolder = (next: string) => {
-    setFolder(next);
-    setSelectedThreadId(null);
+  // Retour/avance du navigateur : l'URL fait foi.
+  useEffect(() => {
+    const onPopState = () => setRoute(parseRoute(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // Une entrée d'historique par navigation, pour qu'une actualisation rouvre la même
+  // conversation et que « retour » referme la conversation (seule sortie sur mobile).
+  const navigate = (next: MailRoute) => {
+    const path = routePath(next);
+    if (window.location.pathname !== path) window.history.pushState(null, "", path);
+    setRoute(next);
   };
+
+  const handleSelectFolder = (next: string) => navigate({ folder: next, threadId: null });
 
   return (
     <div className="grid h-screen grid-cols-1 lg:grid-cols-[220px_360px_1fr]">
@@ -72,7 +86,7 @@ function Mailbox() {
               <ThreadList
                 threads={threads}
                 selectedId={selectedThreadId}
-                onSelect={setSelectedThreadId}
+                onSelect={(threadId) => navigate({ folder, threadId })}
                 hasMore={hasNextPage}
                 isLoadingMore={isFetchingNextPage}
                 onLoadMore={() => fetchNextPage()}
