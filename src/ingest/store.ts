@@ -199,17 +199,19 @@ export async function storeIncoming(
   ];
 
   // Un message qui vient d'arriver est toujours non lu. En boîte de réception, les deux
-  // compteurs du thread progressent d'une unité ; en spam, dossier hors compteurs, seule la
-  // date du fil bouge.
+  // compteurs du thread progressent d'une unité et la date du fil avance. En spam, dossier
+  // hors compteurs, rien ne bouge : une réponse usurpée ne doit pas faire remonter un fil
+  // légitime en tête de la boîte de réception. Un fil créé pour ce spam a déjà reçu sa date
+  // à l'insertion (resolveThread).
   const counted = countsInThread(folder) ? 1 : 0;
   statements.push(
     env.DB.prepare(
       `UPDATE threads
          SET message_count = message_count + ?,
              unread_count = unread_count + ?,
-             last_message_at = MAX(last_message_at, ?)
+             last_message_at = CASE WHEN ? = 1 THEN MAX(last_message_at, ?) ELSE last_message_at END
        WHERE id = ?`
-    ).bind(counted, counted, msg.date, threadId)
+    ).bind(counted, counted, counted, msg.date, threadId)
   );
 
   await env.DB.batch(statements);

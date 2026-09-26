@@ -1,6 +1,7 @@
 import { env, applyD1Migrations } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MAX_BODY_BYTES, storeIncoming, attachmentKey } from "../../src/ingest/store";
+import { listThreads } from "../../src/db/queries";
 
 interface TestEnv {
   TEST_FIXTURES: Record<string, string>;
@@ -219,10 +220,10 @@ describe("storeIncoming — authentification et spam", () => {
     expect(await row(res.messageId)).toMatchObject({ folder: "inbox", auth_dmarc: null });
   });
 
-  it("une réponse usurpée rattachée à un fil existant ne change ni ses compteurs ni sa présence en boîte de réception", async () => {
+  it("une réponse usurpée rattachée à un fil existant ne change ni ses compteurs, ni sa date, ni son aperçu en boîte de réception", async () => {
     const legit = await storeIncoming(env, await load("simple.eml"), envelope);
     const threadId = (await row(legit.messageId))?.thread_id as number;
-    const before = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = ?")
+    const before = await env.DB.prepare("SELECT message_count, unread_count, last_message_at FROM threads WHERE id = ?")
       .bind(threadId).first();
 
     const reply = new TextEncoder().encode(
@@ -243,12 +244,31 @@ describe("storeIncoming — authentification et spam", () => {
 
     const m = await row(spoofed.messageId);
     expect(m).toMatchObject({ folder: "spam", thread_id: threadId });
-    expect(await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = ?").bind(threadId).first())
+    expect(await env.DB.prepare("SELECT message_count, unread_count, last_message_at FROM threads WHERE id = ?").bind(threadId).first())
       .toEqual(before);
     const inbox = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM messages WHERE thread_id = ? AND folder = 'inbox'"
     ).bind(threadId).first<{ n: number }>();
     expect(inbox?.n).toBe(1);
+
+    // La boîte de réception montre le message légitime, jamais l'usurpation plus récente.
+    const inboxList = await listThreads(env.DB, { folder: "inbox" });
+    expect(inboxList.threads).toHaveLength(1);
+    expect(inboxList.threads[0]).toMatchObject({
+      id: threadId,
+      subject: "Facture réglée",
+      snippet: "Bonjour, la facture est réglée.",
+      lastMessageAt: before?.last_message_at,
+    });
+
+    // Le dossier Spam montre le même fil, avec l'objet et l'aperçu du message usurpé.
+    const spamList = await listThreads(env.DB, { folder: "spam" });
+    expect(spamList.threads).toHaveLength(1);
+    expect(spamList.threads[0]).toMatchObject({
+      id: threadId,
+      subject: "Re: Facture réglée",
+      snippet: "Nouveau RIB en pièce jointe.",
+    });
   });
 });
 

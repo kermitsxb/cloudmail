@@ -67,17 +67,20 @@ export async function listThreads(
     // curseur illisible : on l'ignore silencieusement (équivalent à la première page)
   }
 
+  // Objet et aperçu viennent du dernier message DU DOSSIER listé : un spam plus récent
+  // rattaché à un fil légitime ne doit pas s'afficher en boîte de réception, et inversement.
+  // Ces deux sous-requêtes précèdent le WHERE : leurs paramètres sont liés en premier.
   const rows = await db.prepare(
     `SELECT t.id, t.last_message_at, t.message_count, t.unread_count,
-            (SELECT subject FROM messages WHERE thread_id = t.id ORDER BY received_at DESC LIMIT 1) AS subject,
-            (SELECT snippet FROM messages WHERE thread_id = t.id ORDER BY received_at DESC LIMIT 1) AS snippet,
+            (SELECT subject FROM messages WHERE thread_id = t.id AND folder = ? ORDER BY received_at DESC LIMIT 1) AS subject,
+            (SELECT snippet FROM messages WHERE thread_id = t.id AND folder = ? ORDER BY received_at DESC LIMIT 1) AS snippet,
             (SELECT GROUP_CONCAT(DISTINCT from_addr) FROM messages WHERE thread_id = t.id) AS participants,
             (SELECT MAX(has_attachments) FROM messages WHERE thread_id = t.id) AS has_attachments
      FROM threads t
      WHERE ${where}
      ORDER BY t.last_message_at DESC, t.id DESC
      LIMIT ?`
-  ).bind(...params, limit + 1).all<Record<string, never>>();
+  ).bind(opts.folder, opts.folder, ...params, limit + 1).all<Record<string, never>>();
 
   const all = rows.results as unknown as {
     id: number; last_message_at: number; message_count: number; unread_count: number;

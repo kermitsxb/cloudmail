@@ -60,6 +60,17 @@ describe("listThreads", () => {
     expect(threads).toHaveLength(0);
   });
 
+  it("montre l'objet et l'aperçu du dernier message du dossier listé, pas d'un spam plus récent du même fil", async () => {
+    await insertThread(4, "facture", 200);
+    await insertMessage(1, 4, { subject: "Facture", text: "la facture est réglée", at: 100 });
+    await insertMessage(2, 4, { subject: "Re: Facture", text: "nouveau RIB", folder: "spam", at: 200 });
+
+    const inbox = await listThreads(env.DB, { folder: "inbox" });
+    expect(inbox.threads[0]).toMatchObject({ id: 4, subject: "Facture", snippet: "la facture est réglée" });
+    const spam = await listThreads(env.DB, { folder: "spam" });
+    expect(spam.threads[0]).toMatchObject({ id: 4, subject: "Re: Facture", snippet: "nouveau RIB" });
+  });
+
   it("pagine par curseur", async () => {
     for (let i = 1; i <= 3; i++) {
       await insertThread(i, `t${i}`, i * 100);
