@@ -42,8 +42,8 @@ export const fr = {
       `Les messages de la corbeille sont supprimés définitivement après ${days} ${plural.select(days) === "one" ? "jour" : "jours"}.`,
   },
   threadView: {
-    recipients: (list: string) => `À : ${list}`,
-    cc: (list: string) => ` — Cc : ${list}`,
+    to: "À :",
+    cc: "Cc :",
     parseError: "Ce message n'a pas pu être analysé correctement.",
     viewRaw: "Voir le message brut",
     bodyTruncated: "Corps trop volumineux : seul le début a été conservé en base.",
