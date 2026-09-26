@@ -23,6 +23,10 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
+          // Base D1 réservée au test de la migration 0006 (test/db/migration-0006.test.ts) :
+          // elle doit partir d'un schéma 0005, alors que les autres fichiers appliquent toutes
+          // les migrations sur DB.
+          d1Databases: { MIGRATION_DB: "migration-test" },
           bindings: {
             TEST_MIGRATIONS: migrations,
             TEST_FIXTURES: fixtures,
