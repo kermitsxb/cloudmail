@@ -112,6 +112,23 @@ describe("ThreadView", () => {
     expect(screen.getByText(/Bob/)).toBeDefined();
   });
 
+  it("donne l'adresse exacte de l'expéditeur et des destinataires", async () => {
+    renderThreadView();
+    await waitFor(() => {
+      expect(screen.getAllByText("Zoé").length).toBe(2);
+    });
+
+    // Au survol, sur chaque message (replié ou non).
+    for (const name of screen.getAllByText("Zoé")) {
+      expect(name).toHaveAttribute("title", "zoe@example.com");
+    }
+    expect(screen.getByText("Bob")).toHaveAttribute("title", "bob@example.com");
+
+    // En toutes lettres sur le message déplié (id 11), seul.
+    expect(screen.getAllByText("<zoe@example.com>")).toHaveLength(1);
+    expect(screen.getAllByText("<bob@example.com>")).toHaveLength(1);
+  });
+
   it("traduit le bouton de fermeture de la boîte de dialogue de réponse", async () => {
     renderThreadView();
     await screen.findByText("Facture de septembre");

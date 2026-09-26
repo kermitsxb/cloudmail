@@ -7,23 +7,53 @@ import { Composer } from "./Composer";
 import { MessageBody } from "./MessageBody";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
-const formatRecipient = (r: { address: string; name: string | null }) => r.name ?? r.address;
+type Mailbox = { address: string; name: string | null };
 
-function MessageHeader({ message }: { message: MessageDetail }) {
+// Le nom seul sur un message replié, l'adresse au survol ; déplié, l'adresse est
+// aussi écrite en toutes lettres pour qui ne peut pas survoler (écran tactile).
+function Address({ mailbox, showAddress }: { mailbox: Mailbox; showAddress: boolean }) {
+  if (!mailbox.name) return <span>{mailbox.address}</span>;
+  return (
+    <>
+      <span title={mailbox.address}>{mailbox.name}</span>
+      {showAddress && (
+        <span className="font-normal text-muted-foreground"> {`<${mailbox.address}>`}</span>
+      )}
+    </>
+  );
+}
+
+function AddressList({ mailboxes, showAddress }: { mailboxes: Mailbox[]; showAddress: boolean }) {
+  return mailboxes.map((m, i) => (
+    <span key={`${i}-${m.address}`}>
+      {i > 0 && ", "}
+      <Address mailbox={m} showAddress={showAddress} />
+    </span>
+  ));
+}
+
+function MessageHeader({ message, open }: { message: MessageDetail; open: boolean }) {
   const { t, formatDate } = useI18n();
   return (
-    <div className="flex flex-col gap-1 text-sm">
+    <div className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="font-semibold">{formatRecipient(message.from)}</span>
+        <span className="min-w-0 break-words font-semibold">
+          <Address mailbox={message.from} showAddress={open} />
+        </span>
         <time className="shrink-0 text-xs text-muted-foreground">
           {formatDate(new Date(message.receivedAt * 1000), {
             day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
           })}
         </time>
       </div>
-      <p className="truncate text-xs text-muted-foreground">
-        {t.threadView.recipients(message.to.map(formatRecipient).join(", "))}
-        {message.cc.length > 0 && t.threadView.cc(message.cc.map(formatRecipient).join(", "))}
+      <p className={`text-xs text-muted-foreground ${open ? "break-words" : "truncate"}`}>
+        {t.threadView.to} <AddressList mailboxes={message.to} showAddress={open} />
+        {message.cc.length > 0 && (
+          <>
+            {` — ${t.threadView.cc} `}
+            <AddressList mailboxes={message.cc} showAddress={open} />
+          </>
+        )}
       </p>
     </div>
   );
@@ -52,7 +82,7 @@ function MessageItem({
         aria-expanded={open}
         className="flex w-full items-start justify-between gap-2 px-4 py-3 text-left hover:bg-accent"
       >
-        <MessageHeader message={message} />
+        <MessageHeader message={message} open={open} />
       </button>
 
       {open && (

@@ -41,8 +41,8 @@ export const en: Catalog = {
       `Messages in the trash are permanently deleted after ${days} ${plural.select(days) === "one" ? "day" : "days"}.`,
   },
   threadView: {
-    recipients: (list) => `To: ${list}`,
-    cc: (list) => ` — Cc: ${list}`,
+    to: "To:",
+    cc: "Cc:",
     parseError: "This message could not be parsed correctly.",
     viewRaw: "View raw message",
     bodyTruncated: "Body too large: only the beginning was stored.",
