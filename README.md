@@ -29,6 +29,10 @@ installation is configured with its own domain and its own sending identities.
   trash for more than 30 days (configurable) are deleted for good, and the
   storage is checked for received mail missing from the app; the Maintenance
   view and a sidebar badge show the result
+- **SPF/DKIM/DMARC results** shown on each received message; a message
+  failing DMARC goes to **Spam** with a spoofing warning, with "Report as
+  spam" / "Not spam" to move messages in and out by hand; Spam is emptied
+  after the same retention as the trash
 - Interface in English and French: it follows the browser language, and a
   selector in the sidebar remembers another choice
 
@@ -215,7 +219,7 @@ external mailbox.
 | Variable | Where | Purpose |
 | --- | --- | --- |
 | `MAIL_DOMAIN` | `wrangler.overrides.json` → `vars` | Your domain, used in the `Message-ID` of sent mail |
-| `TRASH_RETENTION_DAYS` | `wrangler.jsonc` → `vars` (override in `wrangler.overrides.json`) | Days before trashed messages are deleted for good; `0` disables it (default `30`) |
+| `TRASH_RETENTION_DAYS` | `wrangler.jsonc` → `vars` (override in `wrangler.overrides.json`) | Days before trashed or spam messages are deleted for good; `0` disables it (default `30`) |
 | `ACCESS_TEAM_DOMAIN` | secret | Your Cloudflare Access team domain |
 | `ACCESS_AUD` | secret | The Access application's Audience tag |
 | `ALLOWED_EMAILS` | secret | Address(es) allowed to log in, comma-separated |
@@ -307,20 +311,23 @@ message's folder, read state and conversation, and never forwards it again.
 ### Scheduled maintenance
 
 A Cron Trigger runs once a night (`17 3 * * *` UTC, in `wrangler.jsonc`). It
-deletes up to 100 messages that have been in the trash longer than
+deletes up to 100 messages that have been in the trash or in Spam longer than
 `TRASH_RETENTION_DAYS`, then counts orphaned messages (up to 10,000 stored
 objects per run). Anything left over is handled the following night. Set
 `TRASH_RETENTION_DAYS` to `0` in `wrangler.overrides.json` to keep the trash
-forever. Messages already in the trash when you upgrade get the full
+and Spam forever. Messages already in the trash when you upgrade get the full
 retention period, counted from the upgrade. Messages moved to the trash
 between applying the migration and deploying the new version have no trash
 date and are never purged automatically; restore and trash them again to
 include them.
 
+This release carries migration `0006`, which rebuilds the `messages` table;
+run `pnpm run migrate:remote` before `pnpm run deploy`. Messages received
+earlier have no verdicts until re-imported.
+
 ## Roadmap
 
-- SPF/DKIM/DMARC results shown on each message, with a warning on likely
-  spoofing, and a Spam folder
+Planned work is tracked in [GitHub issues](https://github.com/kermitsxb/cloudmail/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement).
 
 ## Contributing
 

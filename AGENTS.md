@@ -73,6 +73,20 @@ The catch-all is stored as the sentinel `*` rather than `NULL`: two `NULL`s are
 distinct in SQLite, so the unique index on `(match_local, destination)` would allow the
 same catch-all rule twice. `*` is not a valid local part, so it can't collide.
 
+### Authentication verdicts come from Cloudflare's header only
+
+`parseAuthentication` (`src/ingest/auth.ts`) reads the **first**
+`Authentication-Results` header and only if its authserv-id is exactly
+`mx.cloudflare.net`. An MTA prepends its headers, so Cloudflare's sits above
+anything the sender wrote; a forged `mx.cloudflare.net` header further down
+is never read. Never search the headers for "any" Cloudflare line.
+
+Only `dmarc=fail` files a message in `spam` (`storeIncoming`). Email Routing
+already rejects SPF+DKIM failures and DMARC failures under
+`quarantine`/`reject`, so what reaches the Worker is the `p=none` grey zone.
+`spam_score` (`X-CF-SpamH-Score`) is stored and never used: its scale is
+undocumented. Forwarding ignores the verdict.
+
 ### Purge order: R2 first, then D1
 
 `purgeMessage` (`src/db/mutations.ts`) deletes R2 objects, then the D1 row. R2
@@ -96,7 +110,10 @@ returns `409` with `purge_in_progress`.
 
 Deletion is two-step in the UI: `PATCH /api/messages/:id` with `folder:
 "trash"` moves to trash (restoring picks `inbox` or `sent` from the message
-direction); `DELETE /api/messages/:id` purges permanently.
+direction); `DELETE /api/messages/:id` purges permanently. `spam` is the
+second folder outside the thread counters alongside `trash`
+(`src/db/folders.ts`, `countsInThread`); "Not spam" is the same `PATCH`, with
+`folder: "inbox"`.
 
 ### Migrations are immutable once applied
 
@@ -105,6 +122,13 @@ replayed and the database silently keeps the old schema. Any schema change goes
 through a new `migrations/000N_*.sql`. A local database in that state is reset
 with `rm -rf .wrangler/state/v3/d1 .wrangler/state/v3/r2` then
 `pnpm wrangler d1 migrations apply cloudmail --local`.
+
+Changing a `CHECK` on `messages` means rebuilding it (`0006`). D1 enforces
+foreign keys and won't let a migration disable them: `DROP TABLE messages`
+cascades into `recipients` and `attachments`, and `ALTER TABLE … RENAME`
+rewrites child foreign keys to the new name. Rebuild the child tables too,
+drop children first, rename after, keep ids so `messages_fts` stays valid,
+and recreate every index and FTS trigger.
 
 ## Raw MIME storage
 
@@ -130,8 +154,10 @@ It is exposed through `POST /api/admin/reimport` (1 to 10 keys, each matching
   `Message-ID` already belongs to another row (same mail delivered twice with
   different bytes), the outcome is `duplicate` and the orphan stays.
 - **Rows exist**: each is re-parsed **in place**, in one atomic D1 batch.
-  Only parse-derived columns, recipients and attachments are rewritten; `id`,
-  `thread_id`, `folder`, `is_read`, `direction` and `raw_key` never are, so
+  Only parse-derived columns (including `auth_spf`, `auth_dkim`, `auth_dmarc`
+  and `spam_score`), recipients and attachments are rewritten; `id`,
+  `thread_id`, `folder`, `is_read`, `direction` and `raw_key` never are — a
+  message's folder never moves on re-import — so
   thread counters never move and no thread is ever emptied. Rows are found by
   `raw_key`, not by the freshly parsed `Message-ID`: an invented ID
   (`messageIdSynthetic`) changes on every parse, and looking it up used to
@@ -153,12 +179,13 @@ It is exposed through `POST /api/admin/reimport` (1 to 10 keys, each matching
 One Cron Trigger (`triggers.crons` in `wrangler.jsonc`; the free plan allows
 only one) calls `scheduled()` → `runMaintenance`, which never throws:
 
-- **Trash purge** (`trash.ts`): messages with `folder = 'trash'` and
-  `trashed_at` older than `TRASH_RETENTION_DAYS`, oldest first, at most 100
-  per run, each through `purgeMessage` — never a direct delete, so the R2-then-D1
-  order holds. `trashed_at` is set and cleared only by `moveToFolder`, the
-  single path into the trash; keep it that way. A missing or invalid
-  retention value disables the purge rather than deleting anything.
+- **Trash purge** (`trash.ts`): messages with `folder IN ('trash', 'spam')`
+  and `trashed_at` older than `TRASH_RETENTION_DAYS`, oldest first, at most
+  100 per run, each through `purgeMessage` — never a direct delete, so the
+  R2-then-D1 order holds. `trashed_at` is set and cleared only by
+  `moveToFolder` and, for a spam arrival, by `storeIncoming` — the two paths
+  into a retained folder; keep it that way. A missing or invalid retention
+  value disables the purge rather than deleting anything.
 - **Orphan check** (`orphans.ts`): counts `raw/` objects with no row, up to
   20 pages of `listOrphans`. It reports only — never re-imports, never
   deletes. Recovery stays a user action.
@@ -288,12 +315,14 @@ the service public. The order encodes real constraints:
   yet — and the nightly run logs a failure while the Maintenance view shows
   "never run". Without `0005`, any permanent deletion (manual or scheduled)
   and any folder move returns 500 because the purge reservation table is
-  missing.
+  missing. Without `0006`, every incoming message fails its D1 insert
+  (unknown `auth_*` columns) and survives only as an orphan; the old code
+  runs fine on a migrated schema, so migrate first.
 
 ## Two test suites, don't mix them
 
 - `pnpm vitest run` at the root: the Worker, in the Workers runtime (Miniflare
-  provides D1 and R2). 26 files.
+  provides D1 and R2). 28 files.
 - `pnpm --filter web test`: the SPA, in jsdom. 14 files.
 
 `pnpm test` runs both in sequence. `pnpm typecheck` only covers the Worker:
