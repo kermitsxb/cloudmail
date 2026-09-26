@@ -26,6 +26,7 @@ export const en: Catalog = {
     compose: "New message",
     inbox: "Inbox",
     sent: "Sent",
+    spam: "Spam",
     trash: "Trash",
     identities: "Identities",
     forwarding: "Forwarding",
@@ -39,6 +40,8 @@ export const en: Catalog = {
     loadMore: "Load more",
     trashNotice: (days) =>
       `Messages in the trash are permanently deleted after ${days} ${plural.select(days) === "one" ? "day" : "days"}.`,
+    spamNotice: (days) =>
+      `Messages in Spam are permanently deleted after ${days} ${plural.select(days) === "one" ? "day" : "days"}.`,
   },
   threadView: {
     recipients: (list) => `To: ${list}`,
@@ -46,6 +49,11 @@ export const en: Catalog = {
     parseError: "This message could not be parsed correctly.",
     viewRaw: "View raw message",
     bodyTruncated: "Body too large: only the beginning was stored.",
+    spoofed: (domain) => `Likely spoofed: this message claims to come from ${domain} but fails DMARC.`,
+    partialAuth: (checks) => `Partial authentication: ${checks} failed.`,
+    authResults: (summary) => `Authentication: ${summary}`,
+    reportSpam: "Report as spam",
+    notSpam: "Not spam",
     reply: "Reply",
     markUnread: "Mark as unread",
     reimport: "Re-import",

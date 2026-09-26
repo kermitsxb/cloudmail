@@ -22,7 +22,7 @@ const stubConfig = (trashRetentionDays: number | null) => {
 describe("TrashNotice", () => {
   it("annonce le délai de suppression", async () => {
     stubConfig(30);
-    render(<TrashNotice />, { wrapper });
+    render(<TrashNotice folder="trash" />, { wrapper });
     expect(
       await screen.findByText("Les messages de la corbeille sont supprimés définitivement après 30 jours."),
     ).toBeDefined();
@@ -30,9 +30,17 @@ describe("TrashNotice", () => {
 
   it("n'affiche rien quand la purge est désactivée", async () => {
     const fetch = stubConfig(null);
-    const { container } = render(<TrashNotice />, { wrapper });
+    const { container } = render(<TrashNotice folder="trash" />, { wrapper });
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("annonce le délai de suppression du dossier Spam", async () => {
+    stubConfig(30);
+    render(<TrashNotice folder="spam" />, { wrapper });
+    expect(
+      await screen.findByText("Les messages du dossier Spam sont supprimés définitivement après 30 jours."),
+    ).toBeDefined();
   });
 });

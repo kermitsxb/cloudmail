@@ -26,6 +26,7 @@ const thread: ThreadDetail = {
       parseError: false,
       bodyTruncated: false,
       rawKey: "raw/a.eml",
+      auth: null,
       attachments: [],
     },
     {
@@ -44,6 +45,7 @@ const thread: ThreadDetail = {
       parseError: false,
       bodyTruncated: false,
       rawKey: "raw/b.eml",
+      auth: null,
       attachments: [{ id: 99, filename: "facture.pdf", mimeType: "application/pdf", size: 1234 }],
     },
   ],
@@ -200,5 +202,85 @@ describe("ThreadView", () => {
     renderThreadView({ locale: "en" });
     expect(await screen.findByRole("button", { name: "Reply" })).toBeDefined();
     expect(screen.getByText(/^\d+ messages?$/)).toBeDefined();
+  });
+});
+
+describe("ThreadView — authentification", () => {
+  const withMessage = (patch: Partial<ThreadDetail["messages"][number]>) => {
+    const one: ThreadDetail = { ...thread, messages: [{ ...thread.messages[1], ...patch }] };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/threads/1") return Response.json(one);
+      if (url.endsWith("/body")) return Response.json({ html: null, text: "corps", hasRemoteImages: false });
+      if (init?.method === "PATCH") return Response.json({ ok: true });
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+  const patches = (fetchMock: ReturnType<typeof vi.fn>) =>
+    fetchMock.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("avertit d'une usurpation probable quand DMARC échoue", async () => {
+    withMessage({ from: { address: "alerts@bank.example", name: "Banque" }, auth: { spf: "fail", dkim: "fail", dmarc: "fail" } });
+    renderThreadView();
+    expect(await screen.findByText(
+      "Usurpation probable : ce message prétend venir de bank.example mais échoue à la vérification DMARC.",
+    )).toBeDefined();
+    expect(screen.getByText("Authentification : SPF fail · DKIM fail · DMARC fail")).toBeDefined();
+  });
+
+  it("signale une authentification partielle sans échec DMARC", async () => {
+    withMessage({ auth: { spf: "softfail", dkim: "pass", dmarc: "pass" } });
+    renderThreadView();
+    expect(await screen.findByText("Authentification partielle : SPF en échec.")).toBeDefined();
+    expect(screen.queryByText(/Usurpation probable/)).toBeNull();
+  });
+
+  it("n'affiche ni bandeau ni verdicts pour un message sans verdict", async () => {
+    withMessage({ auth: null });
+    renderThreadView();
+    await screen.findByRole("button", { name: /Répondre/ });
+    expect(screen.queryByText(/Usurpation probable|Authentification/)).toBeNull();
+  });
+
+  it("n'affiche aucun bandeau quand tout est valide, seulement les verdicts", async () => {
+    withMessage({ auth: { spf: "pass", dkim: "pass", dmarc: "pass" } });
+    renderThreadView();
+    expect(await screen.findByText("Authentification : SPF pass · DKIM pass · DMARC pass")).toBeDefined();
+    expect(screen.queryByText(/Usurpation probable|partielle/)).toBeNull();
+  });
+
+  it("signale un message reçu comme spam", async () => {
+    const fetchMock = withMessage({ folder: "inbox", isRead: true });
+    renderThreadView();
+    await userEvent.click(await screen.findByRole("button", { name: "Signaler comme spam" }));
+    await waitFor(() => expect(patches(fetchMock)).toContainEqual({ id: 11, folder: "spam" }));
+    expect(screen.queryByRole("button", { name: "Ce n'est pas un spam" })).toBeNull();
+  });
+
+  it("remet un spam en boîte de réception", async () => {
+    const fetchMock = withMessage({ folder: "spam", isRead: true });
+    renderThreadView();
+    await userEvent.click(await screen.findByRole("button", { name: "Ce n'est pas un spam" }));
+    await waitFor(() => expect(patches(fetchMock)).toContainEqual({ id: 11, folder: "inbox" }));
+    expect(screen.queryByRole("button", { name: "Signaler comme spam" })).toBeNull();
+  });
+
+  it("ne propose aucune action spam pour un message envoyé", async () => {
+    withMessage({ direction: "out", folder: "sent", rawKey: "sent/<b@example.com>", isRead: true });
+    renderThreadView();
+    await screen.findByRole("button", { name: /Répondre/ });
+    expect(screen.queryByRole("button", { name: "Signaler comme spam" })).toBeNull();
+  });
+
+  it("s'affiche en anglais", async () => {
+    withMessage({ from: { address: "alerts@bank.example", name: null }, auth: { spf: "pass", dkim: "fail", dmarc: "fail" } });
+    renderThreadView({ locale: "en" });
+    expect(await screen.findByText("Likely spoofed: this message claims to come from bank.example but fails DMARC.")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Report as spam" })).toBeDefined();
   });
 });

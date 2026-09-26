@@ -29,6 +29,41 @@ function MessageHeader({ message }: { message: MessageDetail }) {
   );
 }
 
+const FAILED = new Set(["fail", "softfail"]);
+
+// Bandeau d'authentification : un échec DMARC signale une usurpation probable, où que soit le
+// message ; un échec SPF ou DKIM seul, une authentification partielle. Rien quand tout est
+// valide ou qu'aucun verdict n'est connu.
+function AuthBanner({ message }: { message: MessageDetail }) {
+  const { t } = useI18n();
+  const auth = message.auth;
+  if (!auth) return null;
+  if (auth.dmarc === "fail") {
+    const domain = message.from.address.split("@").pop() ?? message.from.address;
+    return (
+      <div role="alert" className="border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">
+        {t.threadView.spoofed(domain)}
+      </div>
+    );
+  }
+  const failed = [
+    auth.spf && FAILED.has(auth.spf) ? "SPF" : null,
+    auth.dkim && FAILED.has(auth.dkim) ? "DKIM" : null,
+  ].filter(Boolean);
+  if (failed.length === 0) return null;
+  return (
+    <div className="border-b bg-muted px-4 py-2 text-sm">{t.threadView.partialAuth(failed.join(", "))}</div>
+  );
+}
+
+function AuthResults({ message }: { message: MessageDetail }) {
+  const { t } = useI18n();
+  if (!message.auth) return null;
+  const { spf, dkim, dmarc } = message.auth;
+  const summary = `SPF ${spf ?? "—"} · DKIM ${dkim ?? "—"} · DMARC ${dmarc ?? "—"}`;
+  return <p className="px-4 pt-2 text-xs text-muted-foreground">{t.threadView.authResults(summary)}</p>;
+}
+
 function MessageItem({
   message,
   open,
@@ -57,6 +92,8 @@ function MessageItem({
 
       {open && (
         <div>
+          <AuthBanner message={message} />
+          <AuthResults message={message} />
           {message.parseError && (
             <div className="flex items-center justify-between gap-4 border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">
               <span>{t.threadView.parseError}</span>
@@ -115,6 +152,24 @@ function MessageItem({
             >
               {t.common.delete}
             </button>
+            {message.direction === "in" && message.folder !== "spam" && (
+              <button
+                type="button"
+                className="rounded border border-border px-2 py-1 text-xs hover:bg-accent"
+                onClick={() => updateMessage.mutate({ id: message.id, folder: "spam" })}
+              >
+                {t.threadView.reportSpam}
+              </button>
+            )}
+            {message.folder === "spam" && (
+              <button
+                type="button"
+                className="rounded border border-border px-2 py-1 text-xs hover:bg-accent"
+                onClick={() => updateMessage.mutate({ id: message.id, folder: "inbox" })}
+              >
+                {t.threadView.notSpam}
+              </button>
+            )}
             {/* Un message envoyé n'a pas de brut dans R2 (clé sent/…) : rien à réimporter. */}
             {message.direction === "in" && (
               <button

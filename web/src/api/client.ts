@@ -14,6 +14,9 @@ export type ThreadSummary = {
   hasAttachments: boolean;
 };
 
+export type AuthVerdict = "pass" | "fail" | "softfail" | "neutral" | "none" | "temperror" | "permerror";
+export type Folder = "inbox" | "sent" | "trash" | "spam";
+
 export type MessageDetail = {
   id: number;
   messageId: string;
@@ -31,6 +34,8 @@ export type MessageDetail = {
   bodyTruncated: boolean;
   // Clé du brut dans R2 : sert au réimport d'un message reçu.
   rawKey: string;
+  // Verdicts SPF/DKIM/DMARC posés par Cloudflare ; null quand aucun n'est connu.
+  auth: { spf: AuthVerdict | null; dkim: AuthVerdict | null; dmarc: AuthVerdict | null } | null;
   attachments: { id: number; filename: string; mimeType: string; size: number }[];
 };
 
@@ -166,9 +171,8 @@ export const useUpdateMessage = () => {
   return useMutation({
     // La restauration depuis la corbeille dépend de la direction du message : le
     // dossier cible envoyé doit être "sent" pour un message direction === "out",
-    // "inbox" sinon — jamais un retour figé vers "inbox". L'API accepte les trois
-    // dossiers ("inbox" | "sent" | "trash").
-    mutationFn: (vars: { id: number; isRead?: boolean; folder?: "inbox" | "sent" | "trash" }) =>
+    // "inbox" sinon — jamais un retour figé vers "inbox". L'API accepte les quatre dossiers.
+    mutationFn: (vars: { id: number; isRead?: boolean; folder?: Folder }) =>
       api<{ ok: true }>(`/messages/${vars.id}`, { method: "PATCH", body: JSON.stringify(vars) }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["threads"] });

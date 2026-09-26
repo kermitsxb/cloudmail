@@ -40,6 +40,14 @@ describe("sélecteur de langue", () => {
     expect(select).toHaveTextContent("Français");
     expect(select).toHaveTextContent("English");
   });
+
+  it("liste le dossier Spam entre Envoyés et Corbeille", () => {
+    render(<App />, { wrapper });
+    const names = screen.getAllByRole("button").map((b) => b.textContent);
+    const at = (n: string) => names.indexOf(n);
+    expect(at("Spam")).toBeGreaterThan(at("Envoyés"));
+    expect(at("Spam")).toBeLessThan(at("Corbeille"));
+  });
 });
 
 describe("badge des orphelins", () => {

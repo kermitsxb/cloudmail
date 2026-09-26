@@ -27,6 +27,7 @@ export const fr = {
     compose: "Nouveau message",
     inbox: "Boîte de réception",
     sent: "Envoyés",
+    spam: "Spam",
     trash: "Corbeille",
     identities: "Identités",
     forwarding: "Redirections",
@@ -40,6 +41,8 @@ export const fr = {
     loadMore: "Charger plus",
     trashNotice: (days: number) =>
       `Les messages de la corbeille sont supprimés définitivement après ${days} ${plural.select(days) === "one" ? "jour" : "jours"}.`,
+    spamNotice: (days: number) =>
+      `Les messages du dossier Spam sont supprimés définitivement après ${days} ${plural.select(days) === "one" ? "jour" : "jours"}.`,
   },
   threadView: {
     recipients: (list: string) => `À : ${list}`,
@@ -47,6 +50,12 @@ export const fr = {
     parseError: "Ce message n'a pas pu être analysé correctement.",
     viewRaw: "Voir le message brut",
     bodyTruncated: "Corps trop volumineux : seul le début a été conservé en base.",
+    spoofed: (domain: string) =>
+      `Usurpation probable : ce message prétend venir de ${domain} mais échoue à la vérification DMARC.`,
+    partialAuth: (checks: string) => `Authentification partielle : ${checks} en échec.`,
+    authResults: (summary: string) => `Authentification : ${summary}`,
+    reportSpam: "Signaler comme spam",
+    notSpam: "Ce n'est pas un spam",
     reply: "Répondre",
     markUnread: "Marquer comme non lu",
     reimport: "Réimporter",

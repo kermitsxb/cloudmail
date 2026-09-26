@@ -53,7 +53,7 @@ describe("Composer", () => {
           from: { address: "zoe@example.com", name: "Zoé" }, to: [], cc: [],
           subject: "Facture", text: "", html: null, receivedAt: 1, isRead: true,
           parseError: false,
-    bodyTruncated: false, rawKey: "raw/c.eml", attachments: [],
+    bodyTruncated: false, rawKey: "raw/c.eml", auth: null, attachments: [],
         }}
         onClose={() => {}}
       />

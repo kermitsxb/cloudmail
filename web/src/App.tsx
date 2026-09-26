@@ -67,7 +67,7 @@ function Mailbox() {
                 </span>
               </button>
             </div>
-            {folder === "trash" && <TrashNotice />}
+            {(folder === "trash" || folder === "spam") && <TrashNotice folder={folder} />}
             <div className="flex-1 overflow-y-auto">
               <ThreadList
                 threads={threads}

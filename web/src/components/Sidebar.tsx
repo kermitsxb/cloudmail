@@ -7,7 +7,7 @@ import { ComposerPanel } from "./ComposerPanel";
 import { LocaleSelect } from "./LocaleSelect";
 import { Button } from "./ui/button";
 
-const FOLDERS = ["inbox", "sent", "trash"] as const;
+const FOLDERS = ["inbox", "sent", "spam", "trash"] as const;
 
 export function Sidebar({
   folder,
