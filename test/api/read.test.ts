@@ -186,6 +186,28 @@ describe("getThread", () => {
     expect(t?.messages[119].attachments).toHaveLength(1);
   });
 
+  it("expose les verdicts d'authentification d'un message", async () => {
+    await insertThread(1, "facture", 100);
+    await insertMessage(1, 1, { subject: "Facture" });
+    await env.DB.prepare(
+      "UPDATE messages SET auth_spf = 'pass', auth_dkim = 'fail', auth_dmarc = 'fail', spam_score = 7 WHERE id = 1"
+    ).run();
+    const t = await getThread(env.DB, 1);
+    const m = t?.messages.find((x) => x.id === 1);
+    expect(m?.auth).toEqual({ spf: "pass", dkim: "fail", dmarc: "fail" });
+    expect(m).not.toHaveProperty("spamScore");
+  });
+
+  it("renvoie auth: null pour un message reçu avant la migration 0006", async () => {
+    await insertThread(1, "facture", 100);
+    await insertMessage(1, 1, { subject: "Facture" });
+    await env.DB.prepare(
+      "UPDATE messages SET auth_spf = NULL, auth_dkim = NULL, auth_dmarc = NULL WHERE id = 1"
+    ).run();
+    const t = await getThread(env.DB, 1);
+    expect(t?.messages.find((x) => x.id === 1)?.auth).toBeNull();
+  });
+
   it("retourne null pour un thread inexistant", async () => {
     expect(await getThread(env.DB, 999)).toBeNull();
   });

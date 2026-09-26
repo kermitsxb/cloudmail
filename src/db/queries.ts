@@ -1,3 +1,5 @@
+import type { AuthVerdict } from "../ingest/auth";
+
 export type ThreadSummary = {
   id: number; subject: string; snippet: string; lastMessageAt: number;
   messageCount: number; unreadCount: number; participants: string[]; hasAttachments: boolean;
@@ -10,6 +12,8 @@ export type MessageDetail = {
   subject: string; text: string; html: string | null;
   receivedAt: number; isRead: boolean; parseError: boolean; bodyTruncated: boolean;
   rawKey: string;
+  // null : aucun verdict de confiance (message envoyé, reçu avant 0006, sans en-tête Cloudflare).
+  auth: { spf: AuthVerdict | null; dkim: AuthVerdict | null; dmarc: AuthVerdict | null } | null;
   attachments: { id: number; filename: string; mimeType: string; size: number }[];
 };
 export type ThreadDetail = { id: number; subject: string; messages: MessageDetail[] };
@@ -100,7 +104,8 @@ export async function listThreads(
 export async function getThread(db: D1Database, id: number): Promise<ThreadDetail | null> {
   const messages = await db.prepare(
     `SELECT id, message_id, direction, folder, from_addr, from_name, subject, text_body, html_body,
-            received_at, is_read, parse_error, body_truncated, raw_key
+            received_at, is_read, parse_error, body_truncated, raw_key,
+            auth_spf, auth_dkim, auth_dmarc
      FROM messages WHERE thread_id = ? ORDER BY received_at ASC`
   ).bind(id).all<{
     id: number; message_id: string; direction: "in" | "out"; folder: string;
@@ -108,6 +113,7 @@ export async function getThread(db: D1Database, id: number): Promise<ThreadDetai
     text_body: string | null; html_body: string | null;
     received_at: number; is_read: number; parse_error: number; body_truncated: number;
     raw_key: string;
+    auth_spf: AuthVerdict | null; auth_dkim: AuthVerdict | null; auth_dmarc: AuthVerdict | null;
   }>();
   if (messages.results.length === 0) return null;
 
@@ -148,6 +154,9 @@ export async function getThread(db: D1Database, id: number): Promise<ThreadDetai
       parseError: Boolean(m.parse_error),
       bodyTruncated: Boolean(m.body_truncated),
       rawKey: m.raw_key,
+      auth: m.auth_spf === null && m.auth_dkim === null && m.auth_dmarc === null
+        ? null
+        : { spf: m.auth_spf, dkim: m.auth_dkim, dmarc: m.auth_dmarc },
       attachments: attachments.results.filter((a) => a.message_id === m.id)
         .map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mime_type, size: a.size })),
     })),
