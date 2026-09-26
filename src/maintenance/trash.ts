@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { RETAINED_FOLDERS_SQL } from "../db/folders";
 import { purgeMessage } from "../db/mutations";
 
 // Plafond par passage : le plan gratuit limite le temps CPU d'une invocation. Le reste
@@ -19,9 +20,9 @@ export function retentionDays(env: { TRASH_RETENTION_DAYS?: unknown }): number |
 
 export type TrashPurgeResult = { purged: number; failed: number; remaining: number };
 
-// Purge les messages entrés en corbeille avant now − days, les plus anciens d'abord, via
-// purgeMessage : l'ordre R2 puis D1 est conservé, et un échec laisse la ligne en place
-// pour le passage suivant. `now` en secondes.
+// Purge les messages entrés en corbeille ou en spam avant now − days, les plus anciens
+// d'abord, via purgeMessage : l'ordre R2 puis D1 est conservé, et un échec laisse la ligne en
+// place pour le passage suivant. `now` en secondes.
 export async function purgeExpiredTrash(
   env: Env,
   now: number,
@@ -29,7 +30,8 @@ export async function purgeExpiredTrash(
   batch = TRASH_PURGE_BATCH,
 ): Promise<TrashPurgeResult> {
   const cutoff = now - days * DAY;
-  const expired = `FROM messages WHERE folder = 'trash' AND trashed_at IS NOT NULL AND trashed_at < ?`;
+  // Corbeille et spam partagent la même rétention : trashed_at date l'entrée dans l'un ou l'autre.
+  const expired = `FROM messages WHERE folder IN (${RETAINED_FOLDERS_SQL}) AND trashed_at IS NOT NULL AND trashed_at < ?`;
 
   const rows = await env.DB.prepare(`SELECT id ${expired} ORDER BY trashed_at, id LIMIT ?`)
     .bind(cutoff, batch).all<{ id: number }>();

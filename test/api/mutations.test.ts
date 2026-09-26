@@ -430,3 +430,65 @@ describe("routes /api/messages/:id", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("dossier spam", () => {
+  const counters = () =>
+    env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = 1")
+      .first<{ message_count: number; unread_count: number }>();
+  const trashedAt = async (id: number) =>
+    (await env.DB.prepare("SELECT trashed_at FROM messages WHERE id = ?").bind(id)
+      .first<{ trashed_at: number | null }>())?.trashed_at;
+
+  it("sort un message signalé des compteurs et date son entrée", async () => {
+    const before = Math.floor(Date.now() / 1000);
+    expect(await moveToFolder(env.DB, 1, "spam")).toBe(true);
+    expect(await counters()).toEqual({ message_count: 1, unread_count: 1 });
+    expect(await trashedAt(1)).toBeGreaterThanOrEqual(before - 1);
+  });
+
+  it("« Ce n'est pas un spam » rétablit les compteurs et efface la date", async () => {
+    await moveToFolder(env.DB, 1, "spam");
+    await moveToFolder(env.DB, 1, "inbox");
+    expect(await counters()).toEqual({ message_count: 2, unread_count: 2 });
+    expect(await trashedAt(1)).toBeNull();
+  });
+
+  it("spam -> corbeille -> restauration ramène les compteurs exactement", async () => {
+    await moveToFolder(env.DB, 1, "spam");
+    await moveToFolder(env.DB, 1, "trash");
+    expect(await counters()).toEqual({ message_count: 1, unread_count: 1 });
+    await moveToFolder(env.DB, 1, "inbox");
+    expect(await counters()).toEqual({ message_count: 2, unread_count: 2 });
+  });
+
+  it("corbeille -> spam ne touche pas aux compteurs mais redémarre le délai", async () => {
+    await moveToFolder(env.DB, 1, "trash");
+    await env.DB.prepare("UPDATE messages SET trashed_at = 1000 WHERE id = 1").run();
+    await moveToFolder(env.DB, 1, "spam");
+    expect(await counters()).toEqual({ message_count: 1, unread_count: 1 });
+    expect(await trashedAt(1)).toBeGreaterThan(1000);
+  });
+
+  it("lire un spam ne touche pas unread_count", async () => {
+    await moveToFolder(env.DB, 1, "spam");
+    await setRead(env.DB, 1, true);
+    expect(await counters()).toEqual({ message_count: 1, unread_count: 1 });
+  });
+
+  it("purger un spam ne décrémente pas une seconde fois les compteurs", async () => {
+    await moveToFolder(env.DB, 1, "spam");
+    expect(await purgeMessage(env as unknown as Env, 1)).toBe(true);
+    expect(await counters()).toEqual({ message_count: 1, unread_count: 1 });
+  });
+
+  it("accepte folder: spam via PATCH", async () => {
+    const res = await app.request(
+      "https://example.com/api/messages/1",
+      { method: "PATCH", body: JSON.stringify({ folder: "spam" }), headers: { "Content-Type": "application/json" } },
+      { ...env, DEV_BYPASS_AUTH: "1" }
+    );
+    expect(res.status).toBe(200);
+    const m = await env.DB.prepare("SELECT folder FROM messages WHERE id = 1").first<{ folder: string }>();
+    expect(m?.folder).toBe("spam");
+  });
+});

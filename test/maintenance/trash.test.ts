@@ -33,7 +33,7 @@ beforeEach(async () => {
 
 let seq = 0;
 // Un message avec son thread et son brut R2 (sauf clé sent/…, qui n'a jamais d'objet).
-const insertMessage = async (opts: { folder: "inbox" | "sent" | "trash"; trashedAt: number | null; rawKey?: string }) => {
+const insertMessage = async (opts: { folder: "inbox" | "sent" | "trash" | "spam"; trashedAt: number | null; rawKey?: string }) => {
   seq++;
   const rawKey = opts.rawKey ?? `raw/${String(seq).padStart(64, "0")}.eml`;
   if (rawKey.startsWith("raw/")) await env.MAIL.put(rawKey, `Subject: ${seq}\r\n\r\ncorps\r\n`);
@@ -152,7 +152,7 @@ describe("purgeExpiredTrash", () => {
         if (prop !== "prepare") return Reflect.get(target, prop, receiver);
         return (sql: string) => {
           const stmt = target.prepare(sql);
-          if (!sql.startsWith("SELECT 1 FROM messages WHERE folder = 'trash'")) return stmt;
+          if (!sql.startsWith("SELECT 1 FROM messages WHERE folder IN (")) return stmt;
           return new Proxy(stmt, {
             get(stmtTarget, stmtProp, stmtReceiver) {
               if (stmtProp !== "bind") return Reflect.get(stmtTarget, stmtProp, stmtReceiver);
@@ -197,5 +197,23 @@ describe("purgeExpiredTrash", () => {
     expect(res).toEqual({ purged: 1, failed: 1, remaining: 1 });
     expect(await exists(bad.id)).toBe(true);
     expect(await exists(good.id)).toBe(false);
+  });
+});
+
+describe("purgeExpiredTrash — spam", () => {
+  it("purge un spam expiré et garde un spam récent", async () => {
+    const old = await insertMessage({ folder: "spam", trashedAt: NOW - 31 * DAY });
+    const recent = await insertMessage({ folder: "spam", trashedAt: NOW - 1 * DAY });
+    const res = await purgeExpiredTrash(workerEnv, NOW, 30);
+    expect(res).toEqual({ purged: 1, failed: 0, remaining: 0 });
+    expect(await exists(old.id)).toBe(false);
+    expect(await env.MAIL.get(old.rawKey)).toBeNull();
+    expect(await exists(recent.id)).toBe(true);
+  });
+
+  it("ne purge jamais la boîte de réception, même avec une date ancienne", async () => {
+    const inbox = await insertMessage({ folder: "inbox", trashedAt: NOW - 90 * DAY });
+    await purgeExpiredTrash(workerEnv, NOW, 30);
+    expect(await exists(inbox.id)).toBe(true);
   });
 });

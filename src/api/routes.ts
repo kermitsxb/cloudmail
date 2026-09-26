@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
 import type { AccessIdentity } from "../auth/access";
+import { FOLDERS } from "../db/folders";
 import { getThread, listThreads } from "../db/queries";
 import { moveToFolder, purgeMessage, setRead, storeOutgoing } from "../db/mutations";
 import { sanitizeHtml } from "../html/sanitize";
@@ -23,18 +24,19 @@ import { retentionDays } from "../maintenance/trash";
 export type ApiEnv = { Bindings: Env; Variables: { identity: AccessIdentity } };
 
 const listQuery = z.object({
-  folder: z.enum(["inbox", "sent", "trash"]).default("inbox"),
+  folder: z.enum(FOLDERS).default("inbox"),
   q: z.string().max(200).optional(),
   cursor: z.string().max(200).optional(),
 });
 
-// Les trois dossiers sont acceptés ici, pas seulement inbox/trash comme l'écrivait le brief
+// Les quatre dossiers sont acceptés ici, pas seulement inbox/trash comme l'écrivait le brief
 // initial : restaurer un message envoyé depuis la corbeille doit pouvoir le renvoyer vers
-// "sent", pas systématiquement vers "inbox". C'est le front qui choisit le dossier de
+// "sent", pas systématiquement vers "inbox", et signaler ou dé-signaler un message doit
+// pouvoir le déplacer vers/depuis "spam". C'est le front qui choisit le dossier de
 // restauration selon la direction (in/out) du message.
 const patchBody = z.object({
   isRead: z.boolean().optional(),
-  folder: z.enum(["inbox", "sent", "trash"]).optional(),
+  folder: z.enum(FOLDERS).optional(),
 }).refine((b) => b.isRead !== undefined || b.folder !== undefined, {
   message: "Provide isRead or folder",
 });

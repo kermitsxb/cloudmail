@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { countsInThread, RETAINED_FOLDERS_SQL, type Folder } from "./folders";
 import { NO_AUTH } from "../ingest/auth";
 import { resolveThread } from "../ingest/threading";
 import { safeKey, snippetOf } from "../ingest/parse";
@@ -24,10 +25,11 @@ export async function setRead(db: D1Database, messageId: number, isRead: boolean
 
   const statements = [db.prepare("UPDATE messages SET is_read = ? WHERE id = ?").bind(isRead ? 1 : 0, messageId)];
 
-  // Le compteur de non-lus du thread ne reflète que les messages hors corbeille : un message
-  // à la corbeille ne doit jamais faire varier unread_count, sous peine de désynchroniser le
-  // compteur (cf. moveToFolder, qui a déjà ajusté unread_count au moment de la mise à la corbeille).
-  if (row.folder !== "trash") {
+  // Le compteur de non-lus du thread ne reflète que les messages hors corbeille et hors spam :
+  // un message à la corbeille ou en spam ne doit jamais faire varier unread_count, sous peine de
+  // désynchroniser le compteur (cf. moveToFolder, qui a déjà ajusté unread_count au moment de
+  // l'entrée dans l'un ou l'autre).
+  if (countsInThread(row.folder)) {
     statements.push(
       db.prepare("UPDATE threads SET unread_count = MAX(0, unread_count + ?) WHERE id = ?")
         .bind(isRead ? -1 : 1, row.thread_id)
@@ -41,7 +43,7 @@ export async function setRead(db: D1Database, messageId: number, isRead: boolean
 export async function moveToFolder(
   db: D1Database,
   messageId: number,
-  folder: "inbox" | "sent" | "trash",
+  folder: Folder,
 ): Promise<boolean> {
   const row = await db
     .prepare("SELECT thread_id, folder, is_read FROM messages WHERE id = ?")
@@ -50,26 +52,27 @@ export async function moveToFolder(
   if (!row) return false;
   if (row.folder === folder) return true;
 
-  const wasTrash = row.folder === "trash";
-  const goingToTrash = folder === "trash";
+  const wasCounted = countsInThread(row.folder);
+  const willCount = countsInThread(folder);
 
-  // trashed_at date l'entrée en corbeille (point de départ de la purge planifiée) : il est
-  // remis à l'heure courante à chaque entrée et effacé à chaque sortie.
+  // trashed_at date l'entrée en corbeille ou en spam (point de départ de la purge planifiée) :
+  // il est remis à l'heure courante à chaque entrée (y compris corbeille -> spam) et effacé à
+  // chaque sortie.
   const statements = [
     db.prepare(
       `UPDATE messages
           SET folder = ?1,
-              trashed_at = CASE WHEN ?1 = 'trash' THEN unixepoch() ELSE NULL END
+              trashed_at = CASE WHEN ?1 IN (${RETAINED_FOLDERS_SQL}) THEN unixepoch() ELSE NULL END
         WHERE id = ?2 AND folder = ?3
           AND NOT EXISTS (SELECT 1 FROM purge_claims WHERE raw_key = messages.raw_key)`
     ).bind(folder, messageId, row.folder),
   ];
 
-  // message_count et unread_count ne comptabilisent que les messages hors corbeille. Un
-  // aller-retour inbox <-> sent (les deux hors corbeille) ne doit donc toucher aucun des deux
-  // compteurs ; seule une entrée ou sortie de la corbeille les fait varier.
-  if (wasTrash !== goingToTrash) {
-    const delta = goingToTrash ? -1 : 1;
+  // message_count et unread_count ne comptabilisent que les messages hors corbeille et hors
+  // spam. Seul un passage entre un dossier compté (inbox, sent) et un dossier retenu (trash,
+  // spam) les fait varier : inbox <-> sent et trash <-> spam n'y touchent pas.
+  if (wasCounted !== willCount) {
+    const delta = willCount ? 1 : -1;
     const unreadDelta = row.is_read ? 0 : delta;
     statements.push(
       db.prepare(
@@ -105,7 +108,7 @@ export async function purgeMessage(
     env.DB.prepare(
       `INSERT OR IGNORE INTO purge_claims (raw_key, message_id, claimed_at)
        SELECT raw_key, id, unixepoch() FROM messages
-        WHERE id = ?1 AND (?2 IS NULL OR (folder = 'trash' AND trashed_at < ?2))`
+        WHERE id = ?1 AND (?2 IS NULL OR (folder IN (${RETAINED_FOLDERS_SQL}) AND trashed_at < ?2))`
     ).bind(messageId, expectedTrashBefore ?? null),
   ]);
   if (claim.meta.changes === 0) {
@@ -158,14 +161,14 @@ export async function purgeMessage(
     const keys = [...(sharedRaw ? [] : [row.raw_key]), ...atts.results.map((a) => a.r2_key)];
     await env.MAIL.delete(keys);
 
-    // Un message déjà à la corbeille a déjà été retiré de message_count/unread_count par
+    // Un message à la corbeille ou en spam a déjà été retiré de message_count/unread_count par
     // moveToFolder : ne pas les décrémenter une seconde fois ici.
     const statements = [
       env.DB.prepare("DELETE FROM attachments WHERE message_id = ?").bind(messageId),
       env.DB.prepare("DELETE FROM recipients WHERE message_id = ?").bind(messageId),
       env.DB.prepare("DELETE FROM messages WHERE id = ?").bind(messageId),
     ];
-    if (row.folder !== "trash") {
+    if (countsInThread(row.folder)) {
       statements.push(
         env.DB.prepare(
           `UPDATE threads
