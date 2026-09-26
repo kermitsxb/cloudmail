@@ -124,3 +124,21 @@ describe("snippetOf", () => {
     expect(snippetOf("y".repeat(300)).length).toBe(200);
   });
 });
+
+describe("parseEmail — verdicts d'authentification", () => {
+  it("lit les verdicts du premier en-tête Cloudflare", async () => {
+    const msg = await parseEmail(await load("spoofed.eml"), "alerts@bank.example");
+    expect(msg.auth).toEqual({ spf: "fail", dkim: "fail", dmarc: "fail", spamScore: 7 });
+  });
+
+  it("n'a aucun verdict sans en-tête Cloudflare", async () => {
+    const msg = await parseEmail(await load("simple.eml"), "zoe@example.com");
+    expect(msg.auth).toEqual({ spf: null, dkim: null, dmarc: null, spamScore: null });
+  });
+
+  it("n'a aucun verdict pour un message illisible", async () => {
+    const msg = await parseEmail(await load("malformed.eml"), "zoe@example.com");
+    expect(msg.parseError).toBe(true);
+    expect(msg.auth).toEqual({ spf: null, dkim: null, dmarc: null, spamScore: null });
+  });
+});

@@ -1,4 +1,5 @@
 import PostalMime, { type Address } from "postal-mime";
+import { NO_AUTH, parseAuthentication, type AuthResults } from "./auth";
 
 export type ParsedAddress = { address: string; name: string | null };
 export type ParsedAttachment = {
@@ -24,6 +25,7 @@ export type ParsedMessage = {
   date: number; // epoch secondes
   attachments: ParsedAttachment[];
   parseError: boolean;
+  auth: AuthResults; // Verdicts SPF/DKIM/DMARC de Cloudflare ; tous null sans en-tête de confiance.
 };
 
 const RE_PREFIX = /^\s*(re|ré|rép|rep|fw|fwd|tr)\s*(\[\d+\])?\s*:\s*/i;
@@ -70,6 +72,7 @@ export async function parseEmail(raw: ArrayBuffer, envelopeFrom: string): Promis
     date: Math.floor(Date.now() / 1000),
     attachments: [],
     parseError: true,
+    auth: { ...NO_AUTH },
   });
 
   let email;
@@ -113,5 +116,6 @@ export async function parseEmail(raw: ArrayBuffer, envelopeFrom: string): Promis
       };
     }),
     parseError: false,
+    auth: parseAuthentication(email.headers ?? []),
   };
 }

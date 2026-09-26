@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { countsInThread, type Folder } from "../db/folders";
 import { parseEmail, safeKey, snippetOf, type ParsedAttachment, type ParsedMessage } from "./parse";
 import { resolveThread } from "./threading";
 
@@ -111,6 +112,10 @@ export function parsedColumns(msg: ParsedMessage, messageId: string) {
     hasAttachments: msg.attachments.length > 0 ? 1 : 0,
     parseError: msg.parseError ? 1 : 0,
     bodyTruncated: text.truncated || html.truncated ? 1 : 0,
+    authSpf: msg.auth.spf,
+    authDkim: msg.auth.dkim,
+    authDmarc: msg.auth.dmarc,
+    spamScore: msg.auth.spamScore,
   };
 }
 
@@ -144,6 +149,11 @@ export async function storeIncoming(
 
   const cols = parsedColumns(msg, msg.messageId);
 
+  // Seul un échec DMARC classe en spam : c'est le cas « usurpation probable », déterministe.
+  // Les échecs plus faibles (SPF ou DKIM seuls) restent en boîte de réception avec un
+  // avertissement côté interface. Le message est toujours archivé, jamais rejeté.
+  const folder: Folder = msg.auth.dmarc === "fail" ? "spam" : "inbox";
+
   // INSERT OR IGNORE plutôt qu'un INSERT sec : le SELECT d'idempotence ci-dessus ne
   // protège pas de deux livraisons concurrentes du même Message-ID (les deux passent le
   // SELECT avant que l'une n'ait inséré). Avec un INSERT sec, la seconde levait sur la
@@ -154,13 +164,14 @@ export async function storeIncoming(
     `INSERT OR IGNORE INTO messages
        (thread_id, message_id, in_reply_to, direction, folder, from_addr, from_name,
         subject, text_body, html_body, snippet, received_at, is_read, has_attachments, raw_key,
-        parse_error, body_truncated)
-     VALUES (?, ?, ?, 'in', 'inbox', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
+        parse_error, body_truncated, trashed_at, auth_spf, auth_dkim, auth_dmarc, spam_score)
+     VALUES (?, ?, ?, 'in', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?,
+             CASE WHEN ? = 'spam' THEN unixepoch() END, ?, ?, ?, ?)`
   ).bind(
-    threadId, cols.messageId, cols.inReplyTo, cols.fromAddr, cols.fromName,
+    threadId, cols.messageId, cols.inReplyTo, folder, cols.fromAddr, cols.fromName,
     cols.subject, cols.textBody, cols.htmlBody, cols.snippet,
     cols.receivedAt, cols.hasAttachments, rawKey, cols.parseError,
-    cols.bodyTruncated
+    cols.bodyTruncated, folder, cols.authSpf, cols.authDkim, cols.authDmarc, cols.spamScore
   ).run();
 
   if (inserted.meta.changes === 0) {
@@ -187,16 +198,18 @@ export async function storeIncoming(
     ...attachmentStatements(env.DB, messageId, stored),
   ];
 
-  // Un message qui vient d'arriver est toujours non lu, dans la boîte de réception : les
-  // deux compteurs du thread progressent donc systématiquement d'une unité.
+  // Un message qui vient d'arriver est toujours non lu. En boîte de réception, les deux
+  // compteurs du thread progressent d'une unité ; en spam, dossier hors compteurs, seule la
+  // date du fil bouge.
+  const counted = countsInThread(folder) ? 1 : 0;
   statements.push(
     env.DB.prepare(
       `UPDATE threads
-         SET message_count = message_count + 1,
-             unread_count = unread_count + 1,
+         SET message_count = message_count + ?,
+             unread_count = unread_count + ?,
              last_message_at = MAX(last_message_at, ?)
        WHERE id = ?`
-    ).bind(msg.date, threadId)
+    ).bind(counted, counted, msg.date, threadId)
   );
 
   await env.DB.batch(statements);

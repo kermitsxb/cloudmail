@@ -1,0 +1,13 @@
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.com header.s=s1;
+	dmarc=pass header.from=example.com policy.dmarc=none;
+	spf=pass smtp.mailfrom=zoe@example.com
+X-CF-SpamH-Score: 0
+From: Zoé Martin <zoe@example.com>
+To: you@example.com
+Subject: Rendez-vous
+Message-ID: <authenticated-1@example.com>
+Date: Mon, 08 Sep 2026 11:00:00 +0200
+Content-Type: text/plain; charset=utf-8
+
+À demain.

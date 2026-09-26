@@ -499,6 +499,23 @@ describe("reimportKey — réanalyse sur place", () => {
     expect(remaining.objects).toHaveLength(0);
     expect((await messageRow(id))!.subject).toBe(before!.subject);
   });
+
+  it("renseigne les verdicts sans jamais changer de dossier", async () => {
+    const raw = loadBytes("spoofed.eml");
+    const res = await storeIncoming(env, raw, { from: "alerts@bank.example", to: "you@example.com" });
+    // Simule un message reçu avant la migration 0006 : en boîte de réception, sans verdict.
+    await env.DB.prepare(
+      "UPDATE messages SET folder = 'inbox', trashed_at = NULL, auth_spf = NULL, auth_dkim = NULL, auth_dmarc = NULL, spam_score = NULL WHERE id = ?"
+    ).bind(res.messageId).run();
+
+    const outcome = await reimportKey(env, res.rawKey, "test");
+    expect(outcome.outcome).toBe("reparsed");
+
+    const m = await env.DB.prepare(
+      "SELECT folder, trashed_at, auth_spf, auth_dkim, auth_dmarc, spam_score FROM messages WHERE id = ?"
+    ).bind(res.messageId).first();
+    expect(m).toEqual({ folder: "inbox", trashed_at: null, auth_spf: "fail", auth_dkim: "fail", auth_dmarc: "fail", spam_score: 7 });
+  });
 });
 
 describe("reimportKey — garanties", () => {

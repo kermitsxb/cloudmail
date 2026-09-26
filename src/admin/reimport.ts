@@ -173,12 +173,14 @@ async function reparseInPlace(env: Env, rawKey: string, raw: ArrayBuffer, row: E
         `UPDATE messages
             SET message_id = ?, in_reply_to = ?, from_addr = ?, from_name = ?, subject = ?,
                 text_body = ?, html_body = ?, snippet = ?, received_at = ?, has_attachments = ?,
-                parse_error = ?, body_truncated = ?
+                parse_error = ?, body_truncated = ?,
+                auth_spf = ?, auth_dkim = ?, auth_dmarc = ?, spam_score = ?
           WHERE id = ?`
       ).bind(
         cols.messageId, cols.inReplyTo, cols.fromAddr, cols.fromName, cols.subject,
         cols.textBody, cols.htmlBody, cols.snippet, cols.receivedAt, cols.hasAttachments,
-        cols.parseError, cols.bodyTruncated, row.id,
+        cols.parseError, cols.bodyTruncated,
+        cols.authSpf, cols.authDkim, cols.authDmarc, cols.spamScore, row.id,
       ),
       env.DB.prepare("DELETE FROM recipients WHERE message_id = ?").bind(row.id),
       ...recipients,

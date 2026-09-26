@@ -190,6 +190,68 @@ describe("storeIncoming — redélivraison concurrente", () => {
   });
 });
 
+describe("storeIncoming — authentification et spam", () => {
+  const row = (id: number | null) =>
+    env.DB.prepare(
+      "SELECT folder, trashed_at, auth_spf, auth_dkim, auth_dmarc, spam_score, thread_id FROM messages WHERE id = ?"
+    ).bind(id).first<Record<string, unknown>>();
+
+  it("classe un échec DMARC dans Spam, daté, sans toucher aux compteurs du fil", async () => {
+    const before = Math.floor(Date.now() / 1000);
+    const res = await storeIncoming(env, await load("spoofed.eml"), envelope);
+    const m = await row(res.messageId);
+    expect(m).toMatchObject({ folder: "spam", auth_spf: "fail", auth_dkim: "fail", auth_dmarc: "fail", spam_score: 7 });
+    expect(m?.trashed_at as number).toBeGreaterThanOrEqual(before - 1);
+    const t = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = ?")
+      .bind(m?.thread_id).first<{ message_count: number; unread_count: number }>();
+    expect(t).toEqual({ message_count: 0, unread_count: 0 });
+  });
+
+  it("laisse un message authentifié en boîte de réception avec ses verdicts", async () => {
+    const res = await storeIncoming(env, await load("authenticated.eml"), envelope);
+    expect(await row(res.messageId)).toMatchObject({
+      folder: "inbox", trashed_at: null, auth_spf: "pass", auth_dkim: "pass", auth_dmarc: "pass", spam_score: 0,
+    });
+  });
+
+  it("laisse en boîte de réception un message sans verdict", async () => {
+    const res = await storeIncoming(env, await load("simple.eml"), envelope);
+    expect(await row(res.messageId)).toMatchObject({ folder: "inbox", auth_dmarc: null });
+  });
+
+  it("une réponse usurpée rattachée à un fil existant ne change ni ses compteurs ni sa présence en boîte de réception", async () => {
+    const legit = await storeIncoming(env, await load("simple.eml"), envelope);
+    const threadId = (await row(legit.messageId))?.thread_id as number;
+    const before = await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = ?")
+      .bind(threadId).first();
+
+    const reply = new TextEncoder().encode(
+      [
+        "Authentication-Results: mx.cloudflare.net; dmarc=fail header.from=example.com",
+        "From: Zoé Martin <zoe@example.com>",
+        "To: thomas@example.com",
+        "Subject: Re: Facture réglée",
+        "Message-ID: <spoofed-reply@example.com>",
+        "In-Reply-To: <simple-1@example.com>",
+        "Date: Mon, 08 Sep 2026 12:00:00 +0200",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "Nouveau RIB en pièce jointe.",
+      ].join("\r\n"),
+    ).buffer as ArrayBuffer;
+    const spoofed = await storeIncoming(env, reply, envelope);
+
+    const m = await row(spoofed.messageId);
+    expect(m).toMatchObject({ folder: "spam", thread_id: threadId });
+    expect(await env.DB.prepare("SELECT message_count, unread_count FROM threads WHERE id = ?").bind(threadId).first())
+      .toEqual(before);
+    const inbox = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM messages WHERE thread_id = ? AND folder = 'inbox'"
+    ).bind(threadId).first<{ n: number }>();
+    expect(inbox?.n).toBe(1);
+  });
+});
+
 describe("attachmentKey", () => {
   it("range la pièce jointe sous l'identifiant nettoyé du message", () => {
     expect(attachmentKey("<att-1@example.com>", 0, "data.csv")).toBe("att/att-1-example.com/0-data.csv");

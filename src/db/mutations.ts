@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { NO_AUTH } from "../ingest/auth";
 import { resolveThread } from "../ingest/threading";
 import { safeKey, snippetOf } from "../ingest/parse";
 import { sanitizeFilename } from "../ingest/store";
@@ -232,6 +233,7 @@ export async function storeOutgoing(env: Env, req: SendRequest, messageId: strin
     date: now,
     attachments: [],
     parseError: false,
+    auth: { ...NO_AUTH },
   };
 
   const participants = [req.from, ...req.to, ...(req.cc ?? [])];

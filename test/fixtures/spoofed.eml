@@ -1,0 +1,14 @@
+Authentication-Results: mx.cloudflare.net;
+	dkim=fail header.d=bank.example header.s=s1;
+	dmarc=fail header.from=bank.example policy.dmarc=none;
+	spf=fail smtp.mailfrom=alerts@bank.example
+X-CF-SpamH-Score: 7
+Authentication-Results: mx.cloudflare.net; dkim=pass; dmarc=pass; spf=pass smtp.mailfrom=alerts@bank.example
+From: Banque <alerts@bank.example>
+To: you@example.com
+Subject: Votre compte est suspendu
+Message-ID: <spoofed-1@bank.example>
+Date: Mon, 08 Sep 2026 10:00:00 +0200
+Content-Type: text/plain; charset=utf-8
+
+Cliquez ici pour réactiver votre compte.
