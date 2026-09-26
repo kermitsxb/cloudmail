@@ -2,12 +2,11 @@ import { useState } from "react";
 import { useIdentities, useMaintenance } from "../api/client";
 import logo from "../assets/cloudmail-logo.png";
 import { useI18n } from "../i18n";
+import { FOLDERS } from "../lib/route";
 import { Composer } from "./Composer";
 import { ComposerPanel } from "./ComposerPanel";
 import { LocaleSelect } from "./LocaleSelect";
 import { Button } from "./ui/button";
-
-const FOLDERS = ["inbox", "sent", "trash"] as const;
 
 export function Sidebar({
   folder,

@@ -294,7 +294,7 @@ the service public. The order encodes real constraints:
 
 - `pnpm vitest run` at the root: the Worker, in the Workers runtime (Miniflare
   provides D1 and R2). 26 files.
-- `pnpm --filter web test`: the SPA, in jsdom. 14 files.
+- `pnpm --filter web test`: the SPA, in jsdom. 16 files.
 
 `pnpm test` runs both in sequence. `pnpm typecheck` only covers the Worker:
 only `pnpm build` typechecks the SPA (`tsc -b`), so a typing error in `web/`
