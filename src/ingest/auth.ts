@@ -77,7 +77,8 @@ export function parseAuthentication(headers: { key: string; value: string }[]): 
 
   return {
     // Deux résultats SPF possibles (HELO et MAIL FROM) : seul celui de MAIL FROM compte.
-    spf: toVerdict((spf.find((c) => c.props.includes("smtp.mailfrom=")) ?? spf[0])?.result),
+    // Propriété ancrée sur un début de mot : « xsmtp.mailfrom= » n'est pas smtp.mailfrom.
+    spf: toVerdict((spf.find((c) => /(^|\s)smtp\.mailfrom=/.test(c.props)) ?? spf[0])?.result),
     // Plusieurs signatures possibles : une seule valide suffit.
     dkim: toVerdict(dkim.some((c) => c.result === "pass") ? "pass" : dkim[0]?.result),
     dmarc: toVerdict(of("dmarc")[0]?.result),

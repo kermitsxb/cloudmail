@@ -88,12 +88,28 @@ describe("migration 0006", () => {
     expect(updated).not.toBeNull();
   });
 
+  it("passe le contrôle d'intégrité de l'index plein texte", async () => {
+    // rank = 1 : sur une table à contenu externe, compare aussi l'index au contenu de
+    // messages. Sans lui, le contrôle ne vérifie que la cohérence interne de l'index.
+    await expect(db.prepare("INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)").run())
+      .resolves.toBeDefined();
+  });
+
   it("rattache les tables enfants à la nouvelle table messages", async () => {
     const sql = await db.prepare("SELECT sql FROM sqlite_master WHERE name = 'recipients'").first<{ sql: string }>();
     expect(sql?.sql).toMatch(/REFERENCES "?messages"?\s*\(id\)/);
     expect(sql?.sql).not.toMatch(/messages_new/);
     await expect(
       db.prepare("INSERT INTO recipients (message_id, kind, address) VALUES (999, 'to', 'x@example.com')").run()
+    ).rejects.toThrow();
+
+    const att = await db.prepare("SELECT sql FROM sqlite_master WHERE name = 'attachments'").first<{ sql: string }>();
+    expect(att?.sql).toMatch(/REFERENCES "?messages"?\s*\(id\)/);
+    expect(att?.sql).not.toMatch(/messages_new/);
+    await expect(
+      db.prepare(
+        "INSERT INTO attachments (message_id, filename, mime_type, size, r2_key) VALUES (999, 'x.pdf', 'application/pdf', 1, 'att/x')"
+      ).run()
     ).rejects.toThrow();
   });
 

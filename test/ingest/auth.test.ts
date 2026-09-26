@@ -60,6 +60,12 @@ describe("parseAuthentication", () => {
       .toBe("neutral");
   });
 
+  it("ne prend pour smtp.mailfrom que la propriété entière, pas un nom qui la contient", () => {
+    expect(parseAuthentication([
+      h("authentication-results", "mx.cloudflare.net; spf=pass xsmtp.mailfrom=a; spf=fail smtp.mailfrom=b"),
+    ]).spf).toBe("fail");
+  });
+
   it("retient pass si l'une des signatures DKIM est valide, sinon la première", () => {
     expect(parseAuthentication([h("authentication-results", "mx.cloudflare.net; dkim=fail header.d=a; dkim=pass header.d=b")]).dkim)
       .toBe("pass");
