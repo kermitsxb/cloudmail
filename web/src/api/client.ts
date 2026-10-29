@@ -194,6 +194,36 @@ export const useDeleteMessage = () => {
   });
 };
 
+// Conversation entière : `trashed: true` met tous ses messages à la corbeille, `false` les
+// restaure (le Worker choisit "inbox" ou "sent" selon la direction de chacun).
+export const useUpdateThread = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; trashed: boolean }) =>
+      api<{ ok: true }>(`/threads/${vars.id}`, { method: "PATCH", body: JSON.stringify({ trashed: vars.trashed }) }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["threads"] });
+      qc.invalidateQueries({ queryKey: ["thread"] });
+    },
+  });
+};
+
+// Purge les messages de la conversation qui sont à la corbeille. Comme pour la purge du
+// dernier message, on la retire du cache avant l'invalidation pour ne pas la recharger.
+export const useDeleteThread = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api<{ ok: true }>(`/threads/${id}`, { method: "DELETE" }),
+    onSuccess: (_data, id) => {
+      qc.removeQueries({ queryKey: ["thread", id] });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["threads"] });
+      qc.invalidateQueries({ queryKey: ["thread"] });
+    },
+  });
+};
+
 // Miroir volontaire de ForwardRule dans src/forwarding/rules.ts, comme les types
 // ci-dessus : le SPA et le Worker sont deux cibles de build distinctes.
 export type ForwardRule = {

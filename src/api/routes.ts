@@ -3,7 +3,9 @@ import { z } from "zod";
 import type { Env } from "../env";
 import type { AccessIdentity } from "../auth/access";
 import { getThread, listThreads } from "../db/queries";
-import { moveToFolder, purgeMessage, setRead, storeOutgoing } from "../db/mutations";
+import {
+  moveToFolder, purgeMessage, purgeThread, restoreThread, setRead, storeOutgoing, trashThread,
+} from "../db/mutations";
 import { sanitizeHtml } from "../html/sanitize";
 import { MAX_PAYLOAD_BYTES, SendError, payloadSize, sendEmail, type SendRequest } from "../send/client";
 import {
@@ -38,6 +40,10 @@ const patchBody = z.object({
 }).refine((b) => b.isRead !== undefined || b.folder !== undefined, {
   message: "Provide isRead or folder",
 });
+
+// Une conversation entière : `trashed: true` la met à la corbeille, `false` restaure chacun de
+// ses messages vers "inbox" ou "sent" selon sa direction.
+const threadPatchBody = z.object({ trashed: z.boolean() });
 
 const sendBody = z.object({
   from: z.string().email(),
@@ -188,6 +194,27 @@ api.get("/threads/:id", async (c) => {
   const thread = await getThread(c.env.DB, id);
   if (!thread) return c.json({ error: { code: "not_found", message: "Thread not found" } }, 404);
   return c.json(thread);
+});
+
+api.patch("/threads/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
+  const parsed = threadPatchBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: { code: "invalid_body", ...validationError(parsed.error) } }, 400);
+  }
+  const ok = parsed.data.trashed ? await trashThread(c.env.DB, id) : await restoreThread(c.env.DB, id);
+  if (!ok) return c.json({ error: { code: "not_found", message: "Thread not found" } }, 404);
+  return c.json({ ok: true });
+});
+
+// Purge définitive des messages de la conversation qui sont à la corbeille.
+api.delete("/threads/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) return c.json({ error: { code: "invalid_id", message: "Invalid ID" } }, 400);
+  const ok = await purgeThread(c.env, id);
+  if (!ok) return c.json({ error: { code: "not_found", message: "Thread not found" } }, 404);
+  return c.json({ ok: true });
 });
 
 api.get("/identities", async (c) => c.json(await listIdentities(c.env.DB)));

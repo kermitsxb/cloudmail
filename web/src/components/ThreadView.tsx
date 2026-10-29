@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { useDeleteMessage, useReimportMessage, useThread, useUpdateMessage, type MessageDetail } from "../api/client";
+import {
+  useDeleteMessage,
+  useDeleteThread,
+  useReimportMessage,
+  useThread,
+  useUpdateMessage,
+  useUpdateThread,
+  type MessageDetail,
+} from "../api/client";
 import { useI18n } from "../i18n";
 import { errorText } from "../lib/errors";
 import { outcomeLabel } from "../lib/reimport";
@@ -250,6 +258,89 @@ function MessageItem({
   );
 }
 
+// Actions sur toute la conversation, dans l'en-tête : mêmes règles que par message
+// (corbeille hors corbeille ; restauration et purge confirmée dans la corbeille), et la
+// conversation se ferme après un succès puisqu'il n'en reste rien de visible.
+function ThreadActions({
+  threadId,
+  inTrash,
+  messageCount,
+  onClose,
+}: {
+  threadId: number;
+  inTrash: boolean;
+  messageCount: number;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const updateThread = useUpdateThread();
+  const deleteThread = useDeleteThread();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const button = "rounded border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50";
+
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      <div className="flex flex-wrap gap-2">
+        {inTrash ? (
+          <>
+            <button
+              type="button"
+              className={button}
+              disabled={updateThread.isPending}
+              onClick={() => updateThread.mutate({ id: threadId, trashed: false }, { onSuccess: onClose })}
+            >
+              {t.threadView.restoreThread}
+            </button>
+            {confirmingDelete ? (
+              <>
+                <span className="self-center text-xs text-destructive">
+                  {t.threadView.deleteThreadPermanentlyConfirm(messageCount)}
+                </span>
+                <button
+                  type="button"
+                  className="rounded border border-destructive px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                  disabled={deleteThread.isPending}
+                  onClick={() => deleteThread.mutate(threadId, { onSuccess: onClose })}
+                >
+                  {t.threadView.confirm}
+                </button>
+                <button type="button" className={button} onClick={() => setConfirmingDelete(false)}>
+                  {t.common.cancel}
+                </button>
+              </>
+            ) : (
+              <button type="button" className={button} onClick={() => setConfirmingDelete(true)}>
+                {t.threadView.deleteThreadPermanently}
+              </button>
+            )}
+          </>
+        ) : (
+          <button
+            type="button"
+            className={button}
+            disabled={updateThread.isPending}
+            onClick={() => updateThread.mutate({ id: threadId, trashed: true }, { onSuccess: onClose })}
+          >
+            {t.threadView.deleteThread}
+          </button>
+        )}
+      </div>
+      {updateThread.isError && (
+        <p role="alert" className="text-xs text-destructive">
+          {inTrash
+            ? t.threadView.restoreFailed(errorText(updateThread.error, t))
+            : t.common.deleteFailed(errorText(updateThread.error, t))}
+        </p>
+      )}
+      {deleteThread.isError && (
+        <p role="alert" className="text-xs text-destructive">
+          {t.common.deleteFailed(errorText(deleteThread.error, t))}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ThreadView({
   threadId,
   folder,
@@ -321,6 +412,14 @@ export function ThreadView({
         <p className="text-xs text-muted-foreground">
           {t.threadView.messageCount(visibleMessages.length)}
         </p>
+        {visibleMessages.length > 0 && (
+          <ThreadActions
+            threadId={threadId}
+            inTrash={inTrash}
+            messageCount={visibleMessages.length}
+            onClose={onClose}
+          />
+        )}
       </div>
       <ul>
         {visibleMessages.map((m) => (

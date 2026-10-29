@@ -53,6 +53,13 @@ export const fr = {
     restoreFailed: (detail: string) => `Restauration impossible : ${detail}`,
     deletePermanently: "Supprimer définitivement",
     deletePermanentlyConfirm: "Supprimer définitivement ce message ? Cette action est irréversible.",
+    deleteThread: "Supprimer la conversation",
+    restoreThread: "Restaurer la conversation",
+    deleteThreadPermanently: "Supprimer définitivement la conversation",
+    deleteThreadPermanentlyConfirm: (n: number) =>
+      plural.select(n) === "one"
+        ? "Supprimer définitivement le message de cette conversation ? Cette action est irréversible."
+        : `Supprimer définitivement les ${n} messages de cette conversation ? Cette action est irréversible.`,
     confirm: "Confirmer",
     reimport: "Réimporter",
     reimporting: "Réimport…",
