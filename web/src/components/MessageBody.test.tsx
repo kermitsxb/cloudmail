@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MessageBody } from "./MessageBody";
@@ -28,6 +28,23 @@ describe("MessageBody", () => {
     await userEvent.click(bouton);
     const frame = await screen.findByTitle("Contenu du message");
     expect(frame.getAttribute("srcdoc")).toContain("https://x/a.png");
+  });
+
+  it("interdit dans l'iframe tout chargement distant tant que les images ne sont pas affichées", async () => {
+    render(<MessageBody messageId={1} />);
+    const csp = () => {
+      const doc = new DOMParser().parseFromString(screen.getByTitle("Contenu du message").getAttribute("srcdoc") ?? "", "text/html");
+      return doc.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute("content") ?? "";
+    };
+    await screen.findByTitle("Contenu du message");
+    expect(csp()).toContain("default-src 'none'");
+    expect(csp()).toContain(`img-src ${location.origin}/api/attachments/ data:;`);
+    expect(csp()).not.toContain("https:");
+
+    await userEvent.click(screen.getByRole("button", { name: /Afficher les images/ }));
+    await waitFor(() => expect(csp()).toContain(`img-src ${location.origin}/api/attachments/ data: https:;`));
+    expect(csp()).toContain(`img-src ${location.origin}/api/attachments/ data: https:;`);
+    expect(csp()).toContain("font-src data: https:");
   });
 
   it("affiche le texte brut quand il n'y a pas de HTML", async () => {
