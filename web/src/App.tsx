@@ -102,7 +102,11 @@ function Mailbox() {
             {selectedThreadId === null ? (
               <p className="m-auto text-sm text-muted-foreground">{t.app.selectConversation}</p>
             ) : (
-              <ThreadView threadId={selectedThreadId} />
+              <ThreadView
+                threadId={selectedThreadId}
+                folder={folder}
+                onClose={() => navigate({ folder, threadId: null })}
+              />
             )}
           </div>
         </>

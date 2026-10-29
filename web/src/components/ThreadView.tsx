@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useReimportMessage, useThread, useUpdateMessage, type MessageDetail } from "../api/client";
+import { useDeleteMessage, useReimportMessage, useThread, useUpdateMessage, type MessageDetail } from "../api/client";
 import { useI18n } from "../i18n";
 import { errorText } from "../lib/errors";
 import { outcomeLabel } from "../lib/reimport";
@@ -61,16 +61,35 @@ function MessageHeader({ message, open }: { message: MessageDetail; open: boolea
 function MessageItem({
   message,
   open,
+  inTrash,
+  isLastVisible,
   onToggle,
   onReply,
+  onClose,
 }: {
   message: MessageDetail;
   open: boolean;
+  inTrash: boolean;
+  isLastVisible: boolean;
   onToggle: () => void;
   onReply: () => void;
+  onClose: () => void;
 }) {
   const { t } = useI18n();
   const updateMessage = useUpdateMessage();
+  // Instance distincte pour les déplacements : l'erreur d'un déplacement ne doit pas
+  // se mêler à celle du marquage « non lu ».
+  const moveMessage = useUpdateMessage();
+  const deleteMessage = useDeleteMessage();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // La conversation ne se ferme qu'après un succès, et seulement si c'était le dernier
+  // message visible : sinon elle resterait vide (ou 404 après une purge).
+  const afterSuccess = () => {
+    if (isLastVisible) onClose();
+  };
+  const move = (folder: "inbox" | "sent" | "trash") =>
+    moveMessage.mutate({ id: message.id, folder }, { onSuccess: afterSuccess });
   const reimport = useReimportMessage();
 
   return (
@@ -137,13 +156,55 @@ function MessageItem({
             >
               {t.threadView.markUnread}
             </button>
-            <button
-              type="button"
-              className="rounded border border-border px-2 py-1 text-xs hover:bg-accent"
-              onClick={() => updateMessage.mutate({ id: message.id, folder: "trash" })}
-            >
-              {t.common.delete}
-            </button>
+            {inTrash ? (
+              <>
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 py-1 text-xs hover:bg-accent"
+                  onClick={() => move(message.direction === "out" ? "sent" : "inbox")}
+                >
+                  {t.threadView.restore}
+                </button>
+                {confirmingDelete ? (
+                  <>
+                    <span className="self-center text-xs text-destructive">
+                      {t.threadView.deletePermanentlyConfirm}
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded border border-destructive px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                      disabled={deleteMessage.isPending}
+                      onClick={() => deleteMessage.mutate(message.id, { onSuccess: afterSuccess })}
+                    >
+                      {t.threadView.confirm}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border border-border px-2 py-1 text-xs hover:bg-accent"
+                      onClick={() => setConfirmingDelete(false)}
+                    >
+                      {t.common.cancel}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="rounded border border-border px-2 py-1 text-xs hover:bg-accent"
+                    onClick={() => setConfirmingDelete(true)}
+                  >
+                    {t.threadView.deletePermanently}
+                  </button>
+                )}
+              </>
+            ) : (
+              <button
+                type="button"
+                className="rounded border border-border px-2 py-1 text-xs hover:bg-accent"
+                onClick={() => move("trash")}
+              >
+                {t.common.delete}
+              </button>
+            )}
             {/* Un message envoyé n'a pas de brut dans R2 (clé sent/…) : rien à réimporter. */}
             {message.direction === "in" && (
               <button
@@ -156,6 +217,18 @@ function MessageItem({
               </button>
             )}
           </div>
+          {moveMessage.isError && (
+            <p role="alert" className="px-4 pb-2 text-xs text-destructive">
+              {inTrash
+                ? t.threadView.restoreFailed(errorText(moveMessage.error, t))
+                : t.common.deleteFailed(errorText(moveMessage.error, t))}
+            </p>
+          )}
+          {deleteMessage.isError && (
+            <p role="alert" className="px-4 pb-2 text-xs text-destructive">
+              {t.common.deleteFailed(errorText(deleteMessage.error, t))}
+            </p>
+          )}
           {reimport.isError && (
             <p role="alert" className="px-4 pb-2 text-xs text-destructive">
               {t.threadView.reimportFailed(errorText(reimport.error, t))}
@@ -172,13 +245,26 @@ function MessageItem({
   );
 }
 
-export function ThreadView({ threadId }: { threadId: number }) {
+export function ThreadView({
+  threadId,
+  folder,
+  onClose,
+}: {
+  threadId: number;
+  folder: string;
+  onClose: () => void;
+}) {
   const { t } = useI18n();
   const { data: thread, error, isLoading } = useThread(threadId);
   const [openId, setOpenId] = useState<number | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageDetail | null>(null);
   const updateMessage = useUpdateMessage();
   const markedThreadId = useRef<number | null>(null);
+
+  // GET /api/threads/:id renvoie aussi les messages en corbeille : la corbeille
+  // n'affiche que ceux-là, les autres dossiers ne les montrent pas.
+  const inTrash = folder === "trash";
+  const visibleMessages = (thread?.messages ?? []).filter((m) => (m.folder === "trash") === inTrash);
 
   useEffect(() => {
     if (!thread || markedThreadId.current === thread.id) return;
@@ -193,8 +279,8 @@ export function ThreadView({ threadId }: { threadId: number }) {
   }, [thread]);
 
   useEffect(() => {
-    if (thread && thread.messages.length > 0) {
-      setOpenId(thread.messages[thread.messages.length - 1].id);
+    if (visibleMessages.length > 0) {
+      setOpenId(visibleMessages[visibleMessages.length - 1].id);
     }
     // Ne dépend que de l'identifiant du thread : on ne veut réinitialiser le message
     // déplié qu'à l'ouverture d'une nouvelle conversation, pas à chaque refetch (ex.
@@ -222,15 +308,18 @@ export function ThreadView({ threadId }: { threadId: number }) {
       <div className="border-b border-border px-4 py-3">
         <h1 className="text-lg font-semibold">{thread.subject || t.common.noSubject}</h1>
         <p className="text-xs text-muted-foreground">
-          {t.threadView.messageCount(thread.messages.length)}
+          {t.threadView.messageCount(visibleMessages.length)}
         </p>
       </div>
       <ul>
-        {thread.messages.map((m) => (
+        {visibleMessages.map((m) => (
           <MessageItem
             key={m.id}
             message={m}
             open={openId === m.id}
+            inTrash={inTrash}
+            isLastVisible={visibleMessages.length === 1}
+            onClose={onClose}
             onToggle={() => setOpenId(openId === m.id ? null : m.id)}
             onReply={() => setReplyingTo(m)}
           />

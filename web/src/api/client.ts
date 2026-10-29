@@ -177,6 +177,17 @@ export const useUpdateMessage = () => {
   });
 };
 
+export const useDeleteMessage = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api<{ ok: true }>(`/messages/${id}`, { method: "DELETE" }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["threads"] });
+      qc.invalidateQueries({ queryKey: ["thread"] });
+    },
+  });
+};
+
 // Miroir volontaire de ForwardRule dans src/forwarding/rules.ts, comme les types
 // ci-dessus : le SPA et le Worker sont deux cibles de build distinctes.
 export type ForwardRule = {
