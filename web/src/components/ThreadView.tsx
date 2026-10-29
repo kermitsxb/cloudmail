@@ -9,25 +9,24 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 type Mailbox = { address: string; name: string | null };
 
-// Le nom seul sur un message replié, l'adresse au survol ; déplié, l'adresse est
-// aussi écrite en toutes lettres pour qui ne peut pas survoler (écran tactile).
-function Address({ mailbox, showAddress }: { mailbox: Mailbox; showAddress: boolean }) {
+// Le nom suivi de l'adresse, sur chaque message : le nom seul ne dit pas à
+// quelle adresse le message a été envoyé. Replié, la ligne est tronquée et
+// l'adresse reste lisible au survol du nom.
+function Address({ mailbox }: { mailbox: Mailbox }) {
   if (!mailbox.name) return <span>{mailbox.address}</span>;
   return (
     <>
       <span title={mailbox.address}>{mailbox.name}</span>
-      {showAddress && (
-        <span className="font-normal text-muted-foreground"> {`<${mailbox.address}>`}</span>
-      )}
+      <span className="font-normal text-muted-foreground"> {`<${mailbox.address}>`}</span>
     </>
   );
 }
 
-function AddressList({ mailboxes, showAddress }: { mailboxes: Mailbox[]; showAddress: boolean }) {
+function AddressList({ mailboxes }: { mailboxes: Mailbox[] }) {
   return mailboxes.map((m, i) => (
     <span key={`${i}-${m.address}`}>
       {i > 0 && ", "}
-      <Address mailbox={m} showAddress={showAddress} />
+      <Address mailbox={m} />
     </span>
   ));
 }
@@ -38,7 +37,7 @@ function MessageHeader({ message, open }: { message: MessageDetail; open: boolea
     <div className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
       <div className="flex items-baseline justify-between gap-2">
         <span className="min-w-0 break-words font-semibold">
-          <Address mailbox={message.from} showAddress={open} />
+          <Address mailbox={message.from} />
         </span>
         <time className="shrink-0 text-xs text-muted-foreground">
           {formatDate(new Date(message.receivedAt * 1000), {
@@ -47,11 +46,11 @@ function MessageHeader({ message, open }: { message: MessageDetail; open: boolea
         </time>
       </div>
       <p className={`text-xs text-muted-foreground ${open ? "break-words" : "truncate"}`}>
-        {t.threadView.to} <AddressList mailboxes={message.to} showAddress={open} />
+        {t.threadView.to} <AddressList mailboxes={message.to} />
         {message.cc.length > 0 && (
           <>
             {` — ${t.threadView.cc} `}
-            <AddressList mailboxes={message.cc} showAddress={open} />
+            <AddressList mailboxes={message.cc} />
           </>
         )}
       </p>
