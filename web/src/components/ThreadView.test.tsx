@@ -343,5 +343,36 @@ describe("ThreadView", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent(/Suppression impossible/);
       expect(onClose).not.toHaveBeenCalled();
     });
+
+    it("ne recharge pas la conversation après la purge de son dernier message", async () => {
+      serve(single({ folder: "trash" }));
+      renderThreadView({ folder: "trash" });
+      await userEvent.click(await screen.findByRole("button", { name: "Supprimer définitivement" }));
+      const before = fetchMock.mock.calls.filter(([url]) => url === "/api/threads/1").length;
+      await userEvent.click(screen.getByRole("button", { name: "Confirmer" }));
+      await waitFor(() => expect(calls("DELETE")).toHaveLength(1));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(fetchMock.mock.calls.filter(([url]) => url === "/api/threads/1").length).toBe(before);
+    });
+
+    it("déplie le dernier message visible quand le message ouvert disparaît", async () => {
+      let trashed = false;
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === "/api/threads/1") {
+          return Response.json({
+            ...thread,
+            messages: [thread.messages[0], { ...thread.messages[1], folder: trashed ? "trash" : "inbox" }],
+          });
+        }
+        if (url.endsWith("/body")) return Response.json({ html: null, text: "corps", hasRemoteImages: false });
+        if (init?.method === "PATCH" && String(init.body).includes("trash")) trashed = true;
+        return Response.json({ ok: true });
+      });
+      renderThreadView();
+      // Le message 11 est ouvert ; on le met à la corbeille, le 10 doit se déplier.
+      await userEvent.click(await screen.findByRole("button", { name: "Supprimer" }));
+      await waitFor(() => expect(screen.getByText("1 message")).toBeDefined());
+      expect(await screen.findByRole("button", { name: "Répondre" })).toBeDefined();
+    });
   });
 });

@@ -33,9 +33,14 @@ function Mailbox() {
 
   // Une entrée d'historique par navigation, pour qu'une actualisation rouvre la même
   // conversation et que « retour » referme la conversation (seule sortie sur mobile).
-  const navigate = (next: MailRoute) => {
+  // `replace` : après la suppression de la conversation ouverte, « retour » ne doit pas
+  // rouvrir une conversation vide ou purgée.
+  const navigate = (next: MailRoute, { replace = false } = {}) => {
     const path = routePath(next);
-    if (window.location.pathname !== path) window.history.pushState(null, "", path);
+    if (window.location.pathname !== path) {
+      if (replace) window.history.replaceState(null, "", path);
+      else window.history.pushState(null, "", path);
+    }
     setRoute(next);
   };
 
@@ -105,7 +110,7 @@ function Mailbox() {
               <ThreadView
                 threadId={selectedThreadId}
                 folder={folder}
-                onClose={() => navigate({ folder, threadId: null })}
+                onClose={() => navigate({ folder, threadId: null }, { replace: true })}
               />
             )}
           </div>

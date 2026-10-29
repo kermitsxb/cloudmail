@@ -60,6 +60,7 @@ function MessageHeader({ message, open }: { message: MessageDetail; open: boolea
 
 function MessageItem({
   message,
+  threadId,
   open,
   inTrash,
   isLastVisible,
@@ -68,6 +69,7 @@ function MessageItem({
   onClose,
 }: {
   message: MessageDetail;
+  threadId: number;
   open: boolean;
   inTrash: boolean;
   isLastVisible: boolean;
@@ -174,7 +176,10 @@ function MessageItem({
                       type="button"
                       className="rounded border border-destructive px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
                       disabled={deleteMessage.isPending}
-                      onClick={() => deleteMessage.mutate(message.id, { onSuccess: afterSuccess })}
+                      onClick={() => deleteMessage.mutate(
+                          { id: message.id, threadId, threadEmptied: isLastVisible },
+                          { onSuccess: afterSuccess },
+                        )}
                     >
                       {t.threadView.confirm}
                     </button>
@@ -266,6 +271,12 @@ export function ThreadView({
   const inTrash = folder === "trash";
   const visibleMessages = (thread?.messages ?? []).filter((m) => (m.folder === "trash") === inTrash);
 
+  // Si le message déplié a quitté la liste visible (corbeille, restauration, purge) alors
+  // qu'il en reste d'autres, on retombe sur le dernier au lieu de tout replier.
+  const lastVisibleId = visibleMessages.length > 0 ? visibleMessages[visibleMessages.length - 1].id : null;
+  const effectiveOpenId =
+    openId !== null && !visibleMessages.some((m) => m.id === openId) ? lastVisibleId : openId;
+
   useEffect(() => {
     if (!thread || markedThreadId.current === thread.id) return;
     markedThreadId.current = thread.id;
@@ -316,11 +327,12 @@ export function ThreadView({
           <MessageItem
             key={m.id}
             message={m}
-            open={openId === m.id}
+            threadId={threadId}
+            open={effectiveOpenId === m.id}
             inTrash={inTrash}
             isLastVisible={visibleMessages.length === 1}
             onClose={onClose}
-            onToggle={() => setOpenId(openId === m.id ? null : m.id)}
+            onToggle={() => setOpenId(effectiveOpenId === m.id ? null : m.id)}
             onReply={() => setReplyingTo(m)}
           />
         ))}
