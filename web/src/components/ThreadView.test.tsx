@@ -16,7 +16,7 @@ const thread: ThreadDetail = {
       direction: "in",
       folder: "inbox",
       from: { address: "zoe@example.com", name: "Zoé" },
-      to: [{ address: "moi@example.com", name: null }],
+      to: [{ address: "contact@example.com", name: "Équipe" }],
       cc: [],
       subject: "Facture de septembre",
       text: "Bonjour",
@@ -124,9 +124,11 @@ describe("ThreadView", () => {
     }
     expect(screen.getByText("Bob")).toHaveAttribute("title", "bob@example.com");
 
-    // En toutes lettres sur le message déplié (id 11), seul.
-    expect(screen.getAllByText("<zoe@example.com>")).toHaveLength(1);
-    expect(screen.getAllByText("<bob@example.com>")).toHaveLength(1);
+    // En toutes lettres aussi, sur chaque message, replié compris : le nom seul ne
+    // dit pas à quelle adresse le message a été envoyé.
+    expect(screen.getAllByText("<zoe@example.com>")).toHaveLength(2);
+    expect(screen.getByText("<contact@example.com>")).toBeDefined();
+    expect(screen.getByText("<bob@example.com>")).toBeDefined();
   });
 
   it("traduit le bouton de fermeture de la boîte de dialogue de réponse", async () => {
