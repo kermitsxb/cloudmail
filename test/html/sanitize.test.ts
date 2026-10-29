@@ -14,9 +14,9 @@ describe("sanitizeHtml", () => {
     expect(html).toContain("<p>ok</p>");
   });
 
-  it("supprime les balises style", async () => {
-    const { html } = await clean(`<style>body{display:none}</style><p>ok</p>`);
-    expect(html).not.toContain("display:none");
+  it("conserve les feuilles de style embarquées", async () => {
+    const { html } = await clean(`<style>p{color:red}</style><p>ok</p>`);
+    expect(html).toContain("<style>p{color:red}</style>");
   });
 
   it("supprime les gestionnaires d'événements", async () => {
@@ -309,14 +309,11 @@ describe("sanitizeHtml", () => {
     // <script> à l'intérieur est déjà intercepté indépendamment par la règle générale — la
     // balise elle-même peut donc être simplement dépouillée (removeAndKeepContent) sans risque,
     // et son texte légitime doit être conservé (essentiel pour les emails Outlook réels).
-    const center = await clean(`<center>texte centré<script>alert(1)</script></center>`);
-    expect(center.html).not.toContain("<center");
-    expect(center.html).toContain("texte centré");
-    expect(center.html).not.toContain("alert");
+    const blink = await clean(`<blink>texte clignotant<script>alert(1)</script></blink>`);
+    expect(blink.html).not.toContain("<blink");
+    expect(blink.html).toContain("texte clignotant");
+    expect(blink.html).not.toContain("alert");
 
-    const font = await clean(`<font color="red">texte coloré</font>`);
-    expect(font.html).not.toContain("<font");
-    expect(font.html).toContain("texte coloré");
 
     const outlook = await clean(`<o:p>texte outlook</o:p>`);
     expect(outlook.html).not.toContain("<o:p");
@@ -343,5 +340,106 @@ describe("sanitizeHtml — cid: et chaîne de prototypes", () => {
   it("réécrit toujours un cid: réellement présent dans la table", async () => {
     const { html } = await clean(`<img src="cid:logo123">`, { logo123: 7 });
     expect(html).toContain('src="/api/attachments/7"');
+  });
+});
+
+describe("sanitizeHtml — mise en forme", () => {
+  const attrsOf = async (html: string, tag: string) => {
+    const found: Record<string, string>[] = [];
+    await new HTMLRewriter()
+      .on(tag, { element(el) { found.push(Object.fromEntries(el.attributes)); } })
+      .transform(new Response(html))
+      .text();
+    return found;
+  };
+
+  it("conserve les attributs de mise en forme des mails", async () => {
+    const { html } = await clean(
+      `<table class="wrap" id="main" bgcolor="#eee" align="center" border="0" cellpadding="4" cellspacing="0">` +
+        `<tr><td valign="top" style="color:#333;padding:8px">x</td></tr></table>`
+    );
+    const [table] = await attrsOf(html, "table");
+    expect(table).toMatchObject({
+      class: "wrap", id: "main", bgcolor: "#eee", align: "center", border: "0", cellpadding: "4", cellspacing: "0",
+    });
+    const [td] = await attrsOf(html, "td");
+    expect(td).toMatchObject({ valign: "top", style: "color:#333;padding:8px" });
+  });
+
+  it("conserve font et center", async () => {
+    const { html } = await clean(`<center><font color="red" face="Arial" size="2">texte</font></center>`);
+    expect(html).toContain(`<center><font color="red" face="Arial" size="2">texte</font></center>`);
+  });
+
+  it.each([
+    ["expression()", "width:expression(alert(1))"],
+    ["expression() échappé", "width:\\65 xpression(alert(1))"],
+    ["expression() coupé par un commentaire", "width:expr/**/ession(alert(1))"],
+    ["behavior", "behavior:url(x.htc)"],
+    ["-moz-binding", "-moz-binding:url(x.xml#xss)"],
+    ["image-set", `background:image-set("/api/threads" 1x)`],
+    ["url() échappé", "background:\\75 rl(https://tracker/p.gif)"],
+  ])("supprime un attribut style contenant %s", async (_, css) => {
+    const { html } = await clean(`<p style='${css}'>texte</p>`);
+    expect(html).toContain("<p>texte</p>");
+  });
+
+  it("vide une feuille de style contenant @import", async () => {
+    const { html } = await clean(`<style>@import url(https://evil/x.css);p{color:red}</style><p>ok</p>`);
+    expect(html).not.toContain("evil");
+    expect(html).not.toContain("@import");
+  });
+
+  it("neutralise les url() distantes du CSS et le signale quand les images sont bloquées", async () => {
+    const { html, hasRemoteImages } = await clean(
+      `<style>.a{background:url("https://tracker/a.gif") no-repeat}</style>` +
+        `<p style="background-image:url(https://tracker/b.gif)">x</p>`
+    );
+    expect(hasRemoteImages).toBe(true);
+    expect(html).not.toContain("tracker");
+    expect(html).toContain(".a{background:none no-repeat}");
+    expect(html).toContain(`style="background-image:none"`);
+  });
+
+  it("garde les url() distantes du CSS quand les images sont autorisées", async () => {
+    const { html, hasRemoteImages } = await sanitizeHtml(
+      `<style>.a{background:url("https://ok/a.gif")}</style><p style="background:url(https://ok/b.gif)">x</p>`,
+      { cidMap: {}, blockRemoteImages: false }
+    );
+    expect(hasRemoteImages).toBe(true);
+    expect(html).toContain(`url("https://ok/a.gif")`);
+    expect(html).toContain("url(https://ok/b.gif)");
+  });
+
+  it("garde les images data: du CSS, réécrit les cid: et neutralise les URL relatives", async () => {
+    const { html, hasRemoteImages } = await clean(
+      `<style>.a{background:url(data:image/png;base64,AAAA)}.b{background:url('cid:logo')}` +
+        `.c{background:url(/api/threads)}.d{background:url(cid:inconnu)}</style>`,
+      { logo: 9 }
+    );
+    expect(hasRemoteImages).toBe(false);
+    expect(html).toContain("url(data:image/png;base64,AAAA)");
+    expect(html).toContain(`.b{background:url("/api/attachments/9")}`);
+    expect(html).toContain(".c{background:none}");
+    expect(html).toContain(".d{background:none}");
+  });
+
+  it("ne laisse pas un attribut style s'échapper de ses guillemets", async () => {
+    const { html } = await clean(
+      `<p style="font-family:&quot;x&quot; onmouseover=alert(1);background:url(https://t/p.gif)">x</p>`
+    );
+    const [p] = await attrsOf(html, "p");
+    expect(Object.keys(p)).toEqual(["style"]);
+  });
+
+  it("ne laisse pas une feuille de style faire apparaître de balise", async () => {
+    let sawScript = false;
+    const { html } = await clean(`<style>p{color:red}</style><script>alert(1)</script><p>ok</p>`);
+    await new HTMLRewriter()
+      .on("script", { element() { sawScript = true; } })
+      .transform(new Response(html))
+      .text();
+    expect(sawScript).toBe(false);
+    expect(html).not.toContain("alert");
   });
 });

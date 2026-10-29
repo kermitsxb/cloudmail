@@ -5,6 +5,14 @@ import { errorText } from "../lib/errors";
 
 type Body = { html: string | null; text: string; hasRemoteImages: boolean };
 
+function frameCsp(remote: boolean): string {
+  const extra = remote ? " https:" : "";
+  return (
+    `default-src 'none'; style-src 'unsafe-inline'; ` +
+    `img-src ${location.origin}/api/attachments/ data:${extra}; font-src data:${extra}`
+  );
+}
+
 export function MessageBody({ messageId }: { messageId: number }) {
   const { t } = useI18n();
   const [showImages, setShowImages] = useState(false);
@@ -62,12 +70,17 @@ export function MessageBody({ messageId }: { messageId: number }) {
           navigue ni n'ouvre d'onglet. Ce n'est pas un bug à corriger mais un compromis :
           l'isolation prime sur l'ouverture des liens, et ces attributs restent là pour que le
           jour où une permission serait accordée, le comportement soit d'emblée le bon. */}
+      {/* La CSP posée dans le document de l'iframe double le filtrage des url() du CSS fait
+          par l'assainisseur : tant que les images distantes ne sont pas affichées, seules les
+          pièces jointes inline (cid: réécrites vers /api/attachments/) et les data: se
+          chargent — y compris via background-image ou @font-face. L'origine est écrite en
+          toutes lettres car 'self' ne désigne rien dans un document sandbox à origine opaque. */}
       <iframe
         title={t.messageBody.frameTitle}
         sandbox=""
         referrerPolicy="no-referrer"
         className="h-[60vh] w-full border-0"
-        srcDoc={`<!doctype html><meta charset="utf-8"><base target="_blank"><style>body{font:14px system-ui;margin:12px}img{max-width:100%}</style>${body.html}`}
+        srcDoc={`<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${frameCsp(showImages)}"><base target="_blank"><style>body{font:14px system-ui;margin:12px}img{max-width:100%}</style>${body.html}`}
       />
     </div>
   );

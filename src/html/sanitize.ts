@@ -6,10 +6,16 @@ export type SanitizeResult = { html: string; hasRemoteImages: boolean };
 
 // Balises dont le contenu textuel est inoffensif et vaut la peine d'être conservé même
 // si la balise elle-même est retirée (ex: <blink>texte</blink> -> "texte").
+//
+// <style> est autorisée : son contenu passe par sanitizeCss (voir plus bas). Elle reste une
+// balise RAWTEXT, mais on la conserve avec sa balise, donc son texte n'est jamais réinjecté
+// comme balisage — le piège décrit pour DROP_WITH_CONTENT ne la concerne pas.
 const ALLOWED_TAGS = new Set([
-  "a", "b", "blockquote", "br", "code", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6",
-  "hr", "i", "img", "li", "ol", "p", "pre", "s", "small", "span", "strong", "sub", "sup",
-  "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul",
+  "a", "abbr", "address", "article", "aside", "b", "big", "blockquote", "br", "caption",
+  "center", "cite", "code", "col", "colgroup", "dd", "del", "div", "dl", "dt", "em", "figcaption",
+  "figure", "font", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "i", "img",
+  "ins", "li", "main", "mark", "nav", "ol", "p", "pre", "q", "s", "section", "small", "span",
+  "strong", "style", "sub", "sup", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul",
 ]);
 
 // Balises dont le contenu doit disparaître intégralement : soit parce qu'il n'est jamais
@@ -32,11 +38,16 @@ const ALLOWED_TAGS = new Set([
 // contenu normal (ex. <center>, <font>, <o:p> d'Outlook) ; toute la famille RAWTEXT doit être
 // supprimée avec son contenu, comme <script>/<style>.
 const DROP_WITH_CONTENT = new Set([
-  "script", "style", "iframe", "object", "embed", "form", "svg", "math", "link", "meta", "base",
+  "script", "iframe", "object", "embed", "form", "svg", "math", "link", "meta", "base",
   "title", "textarea", "xmp", "noembed", "noframes", "noscript", "plaintext", "listing", "template",
 ]);
 
-const ALLOWED_ATTRS = new Set(["href", "src", "alt", "title", "width", "height", "colspan", "rowspan"]);
+const ALLOWED_ATTRS = new Set([
+  "href", "src", "alt", "title", "width", "height", "colspan", "rowspan",
+  // Mise en forme : `style` passe par sanitizeCss, le reste est purement présentationnel.
+  "style", "class", "id", "align", "valign", "bgcolor", "color", "face", "size", "border",
+  "cellpadding", "cellspacing", "dir", "lang",
+]);
 
 // Liste blanche de schémas d'URL. Volontairement stricte : toute valeur qui ne commence pas
 // par l'un de ces schémas (après trim des espaces en tête/fin) est rejetée, quel que soit son
@@ -45,8 +56,66 @@ const ALLOWED_ATTRS = new Set(["href", "src", "alt", "title", "width", "height",
 // entités HTML décodées par le parseur, data: URIs, etc.) sans avoir à les énumérer.
 const SAFE_URL = /^(https?:|mailto:|cid:)/i;
 
+// --- CSS ---
+//
+// Le CSS est rendu dans l'iframe sandbox="" du front, qui n'exécute aucun script. Ce qui reste
+// à craindre : les constructions historiques exécutables (expression(), behavior, -moz-binding),
+// et surtout le chargement de ressources — une url() distante est un pixel espion qui
+// contournerait le blocage des images. Une feuille ou un attribut contenant une construction
+// interdite est supprimé en entier ; les url() sont filtrées une à une.
+//
+// La détection se fait sur une version « décodée » (commentaires retirés, échappements CSS
+// résolus), pour que `expr/**/ession(` ou `\65 xpression(` ne passent pas. On réécrit en
+// revanche le texte d'origine : réémettre la version décodée dans un <style> permettrait à
+// `\3c /style\3e` de fermer la balise.
+const DANGEROUS_CSS = /expression\s*\(|javascript:|vbscript:|-moz-binding|behavior\s*:|@import|image-set/i;
+const URL_TOKEN = /url\(\s*(['"]?)([^'")]*)\1\s*\)/gi;
+const URL_START = /url\s*\(/gi;
+
+const decodeCss = (css: string) =>
+  css
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\\([0-9a-f]{1,6})\s?|\\([\s\S])/gi, (_, hex: string | undefined, ch: string | undefined) => {
+      if (hex === undefined) return ch ?? "";
+      const code = parseInt(hex, 16);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "\ufffd";
+    });
+
+const count = (re: RegExp, s: string) => s.match(re)?.length ?? 0;
+
+// null : CSS à supprimer entièrement.
+function sanitizeCss(css: string, opts: SanitizeOptions, onRemote: () => void): string | null {
+  const decoded = decodeCss(css);
+  if (DANGEROUS_CSS.test(decoded)) return null;
+  // Chaque url( doit être un jeton que URL_TOKEN sait lire, sans échappement pour en
+  // masquer le nom : sinon une url() pourrait échapper au filtre ci-dessous.
+  const urls = count(URL_TOKEN, css);
+  if (urls !== count(URL_START, css) || urls !== count(URL_START, decoded)) return null;
+
+  return css.replace(URL_TOKEN, (token, _quote: string, raw: string) => {
+    const value = raw.trim();
+    if (value.includes("\\")) return "none";
+    if (/^https?:/i.test(value)) {
+      onRemote();
+      return opts.blockRemoteImages ? "none" : token;
+    }
+    if (/^data:image\//i.test(value)) return token;
+    if (/^cid:/i.test(value)) {
+      const cid = value.slice(4);
+      const id = Object.hasOwn(opts.cidMap, cid) ? opts.cidMap[cid] : undefined;
+      return id === undefined ? "none" : `url("/api/attachments/${id}")`;
+    }
+    // Toute autre URL (relative, schéma inconnu) est refusée, comme pour href/src.
+    return "none";
+  });
+}
+
 export async function sanitizeHtml(html: string, opts: SanitizeOptions): Promise<SanitizeResult> {
   let hasRemoteImages = false;
+  const onRemote = () => {
+    hasRemoteImages = true;
+  };
+  let styleText = "";
 
   const rewriter = new HTMLRewriter().on("*", {
     element(el) {
@@ -69,6 +138,11 @@ export async function sanitizeHtml(html: string, opts: SanitizeOptions): Promise
         }
         if ((lower === "href" || lower === "src") && !SAFE_URL.test(value.trim())) {
           el.removeAttribute(name);
+        }
+        if (lower === "style") {
+          const css = sanitizeCss(value, opts, onRemote);
+          if (css === null) el.removeAttribute(name);
+          else if (css !== value) el.setAttribute(name, css);
         }
       }
 
@@ -100,6 +174,18 @@ export async function sanitizeHtml(html: string, opts: SanitizeOptions): Promise
           el.setAttribute("data-blocked-src", src);
         }
       }
+    },
+  }).on("style", {
+    // Le texte d'un <style> arrive en morceaux : on le retient jusqu'au dernier pour
+    // l'assainir d'un bloc, une construction interdite pouvant chevaucher deux morceaux.
+    text(chunk) {
+      styleText += chunk.text;
+      if (!chunk.lastInTextNode) {
+        chunk.remove();
+        return;
+      }
+      chunk.replace(sanitizeCss(styleText, opts, onRemote) ?? "", { html: true });
+      styleText = "";
     },
   });
 
