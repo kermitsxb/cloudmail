@@ -177,6 +177,23 @@ export const useUpdateMessage = () => {
   });
 };
 
+export const useDeleteMessage = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    // `threadEmptied` : c'était le dernier message de la conversation, qui n'existe plus
+    // (404) ; on la retire du cache avant l'invalidation pour ne pas la recharger.
+    mutationFn: (vars: { id: number; threadId: number; threadEmptied: boolean }) =>
+      api<{ ok: true }>(`/messages/${vars.id}`, { method: "DELETE" }),
+    onSuccess: (_data, vars) => {
+      if (vars.threadEmptied) qc.removeQueries({ queryKey: ["thread", vars.threadId] });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["threads"] });
+      qc.invalidateQueries({ queryKey: ["thread"] });
+    },
+  });
+};
+
 // Miroir volontaire de ForwardRule dans src/forwarding/rules.ts, comme les types
 // ci-dessus : le SPA et le Worker sont deux cibles de build distinctes.
 export type ForwardRule = {

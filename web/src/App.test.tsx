@@ -73,4 +73,32 @@ describe("conversation dans l'URL", () => {
     });
     expect(await screen.findByText("Sélectionnez une conversation.")).toBeDefined();
   });
+
+  it("remplace l'entrée d'historique en refermant une conversation supprimée", async () => {
+    const message = {
+      id: 10, messageId: "<a@example.com>", direction: "in", folder: "inbox",
+      from: { address: "zoe@example.com", name: null }, to: [{ address: "me@example.com", name: null }], cc: [],
+      subject: thread.subject, text: "Bonjour", html: null, receivedAt: 1, isRead: true,
+      parseError: false, bodyTruncated: false, rawKey: "raw/a.eml", attachments: [],
+    };
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/threads/43") return Response.json({ id: 43, subject: thread.subject, messages: [message] });
+      if (url.endsWith("/body")) return Response.json({ html: null, text: "corps", hasRemoteImages: false });
+      if (init?.method === "PATCH") return Response.json({ ok: true });
+      if (url.startsWith("/api/threads")) return Response.json({ threads: [{ ...thread, id: 43 }], cursor: null });
+      return Response.json([]);
+    });
+    // Le client React Query de App est partagé entre les tests : un id propre à ce test
+    // évite de relire la conversation 42 (sans message) mise en cache par les autres.
+    window.history.replaceState(null, "", "/inbox/43");
+    render(<App />, { wrapper });
+    const push = vi.spyOn(window.history, "pushState");
+    const replace = vi.spyOn(window.history, "replaceState");
+    await userEvent.click(await screen.findByRole("button", { name: "Supprimer" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/inbox"));
+    expect(replace).toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    push.mockRestore();
+    replace.mockRestore();
+  });
 });
