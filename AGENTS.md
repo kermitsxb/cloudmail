@@ -96,7 +96,14 @@ returns `409` with `purge_in_progress`.
 
 Deletion is two-step in the UI: `PATCH /api/messages/:id` with `folder:
 "trash"` moves to trash (restoring picks `inbox` or `sent` from the message
-direction); `DELETE /api/messages/:id` purges permanently.
+direction); `DELETE /api/messages/:id` purges permanently. A whole
+conversation follows the same two steps: `PATCH /api/threads/:id` with
+`trashed: true | false` trashes or restores all its messages, and
+`DELETE /api/threads/:id` purges only those already in the trash. Both loop
+over `moveToFolder` / `purgeMessage` (`trashThread`, `restoreThread`,
+`purgeThread`) rather than writing SQL of their own, so counters, purge
+claims and the R2-then-D1 order hold; a half-done run is finished by
+repeating it.
 
 ### Migrations are immutable once applied
 
@@ -293,7 +300,7 @@ the service public. The order encodes real constraints:
 ## Two test suites, don't mix them
 
 - `pnpm vitest run` at the root: the Worker, in the Workers runtime (Miniflare
-  provides D1 and R2). 26 files.
+  provides D1 and R2). 27 files.
 - `pnpm --filter web test`: the SPA, in jsdom. 16 files.
 
 `pnpm test` runs both in sequence. `pnpm typecheck` only covers the Worker:

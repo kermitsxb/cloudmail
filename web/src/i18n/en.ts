@@ -52,6 +52,13 @@ export const en: Catalog = {
     restoreFailed: (detail) => `Could not restore: ${detail}`,
     deletePermanently: "Delete permanently",
     deletePermanentlyConfirm: "Permanently delete this message? This cannot be undone.",
+    deleteThread: "Delete conversation",
+    restoreThread: "Restore conversation",
+    deleteThreadPermanently: "Permanently delete conversation",
+    deleteThreadPermanentlyConfirm: (n) =>
+      plural.select(n) === "one"
+        ? "Permanently delete the message in this conversation? This cannot be undone."
+        : `Permanently delete the ${n} messages in this conversation? This cannot be undone.`,
     confirm: "Confirm",
     reimport: "Re-import",
     reimporting: "Re-importing…",

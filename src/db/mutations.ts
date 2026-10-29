@@ -192,6 +192,50 @@ export async function purgeMessage(
   }
 }
 
+// Actions sur une conversation entière : chacune enchaîne l'opération par message
+// (moveToFolder, purgeMessage) au lieu de la réécrire, pour conserver les compteurs du thread,
+// les réservations de purge et l'ordre R2 puis D1. L'enchaînement n'est pas atomique, mais
+// chaque étape est idempotente : relancer l'action termine une conversation à moitié traitée.
+// Elles retournent false quand la conversation n'existe pas.
+const threadMessages = async (db: D1Database, threadId: number) => {
+  const thread = await db.prepare("SELECT 1 FROM threads WHERE id = ?").bind(threadId).first();
+  if (!thread) return null;
+  const rows = await db
+    .prepare("SELECT id, direction, folder FROM messages WHERE thread_id = ? ORDER BY id")
+    .bind(threadId)
+    .all<{ id: number; direction: string; folder: string }>();
+  return rows.results;
+};
+
+export async function trashThread(db: D1Database, threadId: number): Promise<boolean> {
+  const messages = await threadMessages(db, threadId);
+  if (!messages) return false;
+  for (const m of messages) {
+    if (m.folder !== "trash") await moveToFolder(db, m.id, "trash");
+  }
+  return true;
+}
+
+export async function restoreThread(db: D1Database, threadId: number): Promise<boolean> {
+  const messages = await threadMessages(db, threadId);
+  if (!messages) return false;
+  for (const m of messages) {
+    if (m.folder === "trash") await moveToFolder(db, m.id, m.direction === "out" ? "sent" : "inbox");
+  }
+  return true;
+}
+
+// Ne purge que les messages déjà à la corbeille : depuis la corbeille, la conversation
+// n'affiche qu'eux, et un message resté dans un autre dossier n'a pas été supprimé.
+export async function purgeThread(env: Env, threadId: number): Promise<boolean> {
+  const messages = await threadMessages(env.DB, threadId);
+  if (!messages) return false;
+  for (const m of messages) {
+    if (m.folder === "trash") await purgeMessage(env, m.id);
+  }
+  return true;
+}
+
 // Stocke une copie d'un message sortant déjà envoyé avec succès (voir POST /messages dans
 // api/routes.ts, qui n'appelle cette fonction qu'après confirmation de sendEmail). On
 // réutilise resolveThread — écrit pour les messages entrants — en construisant un objet de

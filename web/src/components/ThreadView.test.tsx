@@ -355,6 +355,81 @@ describe("ThreadView", () => {
       expect(fetchMock.mock.calls.filter(([url]) => url === "/api/threads/1").length).toBe(before);
     });
 
+    it("met toute la conversation à la corbeille en une requête, puis ferme", async () => {
+      const onClose = vi.fn();
+      renderThreadView({ onClose });
+      await userEvent.click(await screen.findByRole("button", { name: "Supprimer la conversation" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+      expect(calls("PATCH").filter(([url]) => url === "/api/threads/1")).toHaveLength(1);
+      expect(bodies("PATCH")).toContainEqual({ trashed: true });
+    });
+
+    it("affiche une erreur quand la mise à la corbeille de la conversation échoue, sans fermer", async () => {
+      serve(thread, (url, init) =>
+        init?.method === "PATCH" && url === "/api/threads/1"
+          ? Response.json({ error: { code: "purge_in_progress", message: "busy" } }, { status: 409 })
+          : undefined,
+      );
+      const onClose = vi.fn();
+      renderThreadView({ onClose });
+      await userEvent.click(await screen.findByRole("button", { name: "Supprimer la conversation" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/Suppression impossible/);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("dans la corbeille, restaure toute la conversation puis ferme", async () => {
+      serve({ ...thread, messages: thread.messages.map((m) => ({ ...m, folder: "trash" })) });
+      const onClose = vi.fn();
+      renderThreadView({ folder: "trash", onClose });
+      expect(screen.queryByRole("button", { name: "Supprimer la conversation" })).toBeNull();
+      await userEvent.click(await screen.findByRole("button", { name: "Restaurer la conversation" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+      expect(bodies("PATCH")).toContainEqual({ trashed: false });
+    });
+
+    it("demande confirmation avant de supprimer définitivement la conversation, puis ferme sans la recharger", async () => {
+      serve({ ...thread, messages: thread.messages.map((m) => ({ ...m, folder: "trash" })) });
+      const onClose = vi.fn();
+      renderThreadView({ folder: "trash", onClose });
+
+      await userEvent.click(await screen.findByRole("button", { name: "Supprimer définitivement la conversation" }));
+      expect(calls("DELETE")).toHaveLength(0);
+      expect(screen.getByText(/Supprimer définitivement les 2 messages de cette conversation/)).toBeDefined();
+
+      await userEvent.click(screen.getByRole("button", { name: "Annuler" }));
+      expect(calls("DELETE")).toHaveLength(0);
+
+      await userEvent.click(screen.getByRole("button", { name: "Supprimer définitivement la conversation" }));
+      const reloads = () =>
+        fetchMock.mock.calls.filter(([url, init]) => url === "/api/threads/1" && !(init as RequestInit | undefined)?.method).length;
+      const before = reloads();
+      await userEvent.click(screen.getByRole("button", { name: "Confirmer" }));
+      await waitFor(() => expect(calls("DELETE")).toHaveLength(1));
+      expect(calls("DELETE")[0][0]).toBe("/api/threads/1");
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(reloads()).toBe(before);
+    });
+
+    it("affiche une erreur quand la suppression définitive de la conversation échoue", async () => {
+      serve({ ...thread, messages: thread.messages.map((m) => ({ ...m, folder: "trash" })) }, (_url, init) =>
+        init?.method === "DELETE"
+          ? Response.json({ error: { code: "internal_error", message: "boom" } }, { status: 500 })
+          : undefined,
+      );
+      const onClose = vi.fn();
+      renderThreadView({ folder: "trash", onClose });
+      await userEvent.click(await screen.findByRole("button", { name: "Supprimer définitivement la conversation" }));
+      await userEvent.click(screen.getByRole("button", { name: "Confirmer" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/Suppression impossible/);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("propose la suppression de la conversation en anglais", async () => {
+      renderThreadView({ locale: "en" });
+      expect(await screen.findByRole("button", { name: "Delete conversation" })).toBeDefined();
+    });
+
     it("déplie le dernier message visible quand le message ouvert disparaît", async () => {
       let trashed = false;
       fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {

@@ -12,6 +12,7 @@ installation is configured with its own domain and its own sending identities.
 ## Features
 
 - **Inbox, Sent and Trash**, with conversations grouped into threads
+  — delete or restore a single message or a whole conversation
 - **Full-text search** across subjects, senders and message bodies
 - **Compose and reply** from any of your sending identities, each with its own
   display name
